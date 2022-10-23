@@ -1,0 +1,4 @@
+/* `main` is the default command */
+test: npm run test
+main: node index.js
+/* command_name: terminal command */
