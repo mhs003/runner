@@ -1,0 +1,37 @@
+#!/usr/bin/python3
+
+import os, subprocess, sys
+
+runnerfile = os.getcwd() + '/.runner'
+
+if os.path.exists(runnerfile):
+    f = open(runnerfile, 'r')
+    lines = f.read().splitlines()
+    command_str = ''
+    error = ''
+    if len(sys.argv) > 1:
+        for line in lines:
+            if line.startswith(sys.argv[1] + ':'):
+                command_str = line[len(sys.argv[1]) + 1:].strip()
+                error = ''
+                break
+            else:
+                error = 'Error: no `{}` command found'.format(sys.argv[1])
+    else:
+        for line in lines:
+            if line.startswith('main:'):
+                command_str = line[5:].strip()
+                error = ''
+                break
+            else:
+                error = 'Error: no `main` command found'
+        
+
+    if error:
+        print(error)
+    else:
+        command = command_str.split(' ')
+        # print("Running `{}` ...\n".format(command_str))
+        subprocess.run(command)
+else :
+    print("No .runner file found in the directory")
