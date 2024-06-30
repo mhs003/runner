@@ -15,8 +15,8 @@ $ git clone https://github.com/mhs003/runner.git
 then run,
 ```bash
 $ cd runner
-$ cp ./run /usr/local/bin
-$ sudo chmod +x /usr/local/bin/run
+$ chmod +x ./run
+$ sudo cp ./run /usr/local/bin
 ```
 
 ## how to use
