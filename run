@@ -34,6 +34,6 @@ if os.path.exists(runnerfile):
     else:
         # command = command_str.split(' ')
         # print("Running `{}` ...\n".format(command_str))
-        subprocess.run(command_str)
+        subprocess.run(command_str, shell=True)
 else :
     print("No .runner file found in the directory")
