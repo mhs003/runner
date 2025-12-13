@@ -1,0 +1,9 @@
+vars:
+  BIN = app
+
+hello:
+  echo "test test"
+  echo hello world
+
+build:
+  echo building {{BIN}}
