@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"maps"
 	"mhs003/runner/internal/config"
 	"mhs003/runner/internal/engine"
 	"os"
@@ -10,38 +11,54 @@ import (
 )
 
 func main() {
-    dry := flag.Bool("dry", false, "dry run")
-    flag.Parse()
+	dry := flag.Bool("dry", false, "dry run")
+	flag.Parse()
 
-    if flag.NArg() < 1 {
-        fmt.Println("task name required")
-        os.Exit(1)
-    }
+	taskName := "main" // default task
+	if flag.NArg() >= 1 {
+		taskName = flag.Arg(0)
+	}
 
-    taskName := flag.Arg(0)
+	data, _, err := config.Load()
+	if err != nil {
+		panic(err)
+	}
 
-    data, _, err := config.Load()
-    if err != nil {
-        panic(err)
-    }
+	lines := config.Lex(string(data))
+	file, err := config.Parse(lines)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 
-    lines := config.Lex(string(data))
-    file := config.Parse(lines)
+	if _, ok := file.Tasks[taskName]; !ok {
+		if flag.NArg() == 0 {
+			fmt.Println("Please specify a task name.")
+		} else {
+			fmt.Printf("Task '%s' not found\n", taskName)
+		}
+		os.Exit(1)
+	}
 
-    vars := map[string]string{}
-    for k, v := range file.Vars {
-        vars[k] = v
-    }
+	vars := map[string]string{}
+	maps.Copy(vars, file.Vars)
 
-    vars["PWD"], _ = os.Getwd()
-    vars["OS"] = runtime.GOOS
-    vars["ARCH"] = runtime.GOARCH
+	cats := map[string]*config.Cat{}
+	maps.Copy(cats, file.Cats)
 
-    seen := map[string]bool{}
-    order := []*config.Task{}
-    engine.Resolve(file, taskName, seen, &order)
+	vars["CWD"], _ = os.Getwd()
+	vars["OS"] = runtime.GOOS
+	vars["ARCH"] = runtime.GOARCH
 
-    if err := engine.Execute(order, vars, *dry); err != nil {
-        os.Exit(1)
-    }
+	seen := map[string]bool{}
+	stack := map[string]bool{}
+	order := []*config.Task{}
+	if err := engine.Resolve(file, taskName, seen, stack, &order); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	if err := engine.Execute(order, vars, cats, *dry); err != nil {
+		os.Exit(1)
+	}
 }

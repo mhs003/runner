@@ -1,52 +1,132 @@
 package config
 
 import (
+	"fmt"
+	"os"
 	"strings"
 )
 
-func Parse(lines []Line) *File {
-    f := &File{
-        Vars:  map[string]string{},
-        Tasks: map[string]*Task{},
-    }
+func Parse(lines []Line) (*File, error) {
+	f := &File{
+		Vars:  map[string]string{},
+		Cats:  map[string]*Cat{},
+		Tasks: map[string]*Task{},
+	}
 
-    var current *Task
+	var current *Task
 
-    for i := 0; i < len(lines); i++ {
-        l := lines[i]
-        if l.Text == "" {
-            continue
-        }
+	for i := 0; i < len(lines); {
+		l := lines[i]
+		if l.Text == "" {
+			i++
+			// current = nil
+			continue
+		}
 
-        if strings.HasSuffix(l.Text, ":") && l.Indent == 0 {
-            name := strings.TrimSuffix(l.Text, ":")
+		// consume task headers or meta blocks
+		if strings.HasSuffix(l.Text, ":") && l.Indent == 0 {
+			name := strings.TrimSuffix(l.Text, ":")
 
-            if name == "vars" {
-                for j := i + 1; j < len(lines) && lines[j].Indent > 0; j++ {
-                    parts := strings.SplitN(lines[j].Text, "=", 2)
-                    if len(parts) == 2 {
-                        f.Vars[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-                    }
-                }
-                continue
-            }
+			if strings.HasPrefix(name, "@") {
+				if name == "@vars" {
+					j := i + 1
+					for ; j < len(lines); j++ {
+						if lines[j].Indent == 0 {
+							break
+						}
+						if lines[j].Text == "" {
+							continue
+						}
+						parts := strings.SplitN(lines[j].Text, "=", 2)
+						if len(parts) == 2 {
+							f.Vars[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+						}
+					}
+					current = nil
+					i = j
+					continue
+				}
 
-            parts := strings.Split(name, " ")
-            taskName := parts[0]
-            deps := []string{}
-            if len(parts) > 1 {
-                deps = parts[1:]
-            }
+				if name == "@cat" {
+					j := i + 1
+					for ; j < len(lines); j++ {
+						if lines[j].Indent == 0 {
+							break
+						}
+						if lines[j].Text == "" {
+							continue
+						}
+						parts := strings.SplitN(lines[j].Text, "=", 2)
+						if len(parts) == 2 {
+							catName := strings.TrimSpace(parts[0])
+							path := strings.TrimSpace(parts[1])
+							content := ""
 
-            current = &Task{Name: taskName, Deps: deps}
-            f.Tasks[taskName] = current
-            continue
-        }
+							if data, err := os.ReadFile(path); err == nil {
+								content = string(data)
+							} else {
+								fmt.Println(err)
+							}
 
-        if current != nil && l.Indent > 0 {
-            current.Commands = append(current.Commands, l.Text)
-        }
-    }
+							f.Cats[catName] = &Cat{
+								Name:     catName,
+								FilePath: path,
+								Content:  content,
+							}
+						}
+					}
+					current = nil
+					i = j
+					continue
+				}
 
-    return f
+				// handle other ... meta blocks
+				// ...
+			}
+
+			// comsume task headers
+			taskName := name
+			deps := []string{}
+
+			if strings.Contains(name, " ") {
+				parts := strings.SplitN(name, " ", 2)
+				taskName = parts[0]
+				deps = strings.Fields(parts[1])
+			}
+
+			current = &Task{Name: taskName, Deps: deps}
+			f.Tasks[taskName] = current
+			i++
+			continue
+		}
+
+		if l.Indent == 0 && current == nil {
+			return nil, &ParseError{
+				Line: l.No,
+				Msg:  fmt.Sprintf("Syntax error: unknown keyword '%s' at line '%d'", l.Text, l.No),
+			}
+		}
+
+		// consume task commands
+		if l.Indent > 0 {
+			if current == nil {
+				return nil, &ParseError{
+					Line: l.No,
+					Msg:  fmt.Sprintf("Syntax error: command found outside of a task at line '%d' in '%s'", l.No, l.Text),
+				}
+			}
+			if strings.HasPrefix(l.Text, "$") {
+				deps := strings.Fields(l.Text[1:])
+				// push dependencies
+				current.Deps = append(current.Deps, deps...)
+			} else {
+				current.Commands = append(current.Commands, l.Text)
+			}
+			i++
+			continue
+		}
+		i++
+	}
+
+	return f, nil
 }
