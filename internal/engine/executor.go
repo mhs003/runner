@@ -11,16 +11,28 @@ import (
 func Execute(tasks []*config.Task, vars map[string]string, cats map[string]*config.Cat, dry bool) error {
 	for _, t := range tasks {
 		for _, c := range t.Commands {
+			shouldVerbose := false
+			if strings.HasPrefix(c, "!") {
+				shouldVerbose = true
+				c = c[1:]
+			}
 			cmd := interpolate(c, vars, cats)
 			if dry {
 				fmt.Println(cmd)
 				continue
+			}
+			if shouldVerbose == true {
+				fmt.Printf("> %s\n", cmd)
 			}
 			ec := exec.Command("/bin/sh", "-c", cmd)
 			ec.Stdout = os.Stdout
 			ec.Stderr = os.Stderr
 			if err := ec.Run(); err != nil {
 				return err
+			} else {
+				if shouldVerbose == true {
+					fmt.Println("Complete!")
+				}
 			}
 		}
 	}

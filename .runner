@@ -1,27 +1,18 @@
 @vars:
-  BIN = app
-  TIN = 234623
-
-@cat:
-  runner_save = .runner
+  BUILD_DIR="./build"
+  BIN="run"
+  ENTRY="./cmd/run"
 
 main:
-  $ build dev:backend
-  echo "Done!"
+  $ build
 
-
-runner_save:
-  echo "{{runner_save}}" > test.txt
-
-hello:
-  echo "test test"
-  echo "hello world"
-
-dev:backend:
-  echo "Backend dev server started at port :9091"
-
-dev:frontend:
-  echo "frontend dev server started at port :3000"
-  
 build:
-  echo "building '{{BIN}}' in '{{CWD}}/build' for '{{OS}}-{{ARCH}}'"
+  mkdir -p {{BUILD_DIR}}
+  !go build -o build/{{BIN}} {{ENTRY}}
+  # ! = enable verbose
+
+install:
+  !cp {{BUILD_DIR}}/{{BIN}} ~/.config/hypr/bin/run
+
+run:
+  {{BUILD_DIR}}/{{BIN}}

@@ -14,7 +14,7 @@ func Resolve(f *config.File, name string, seen map[string]bool, stack map[string
 		return nil
 	}
 
-	if f.Tasks[name].Commands == nil {
+	if f.Tasks[name].Commands == nil && f.Tasks[name].Deps == nil {
 		fmt.Printf("Warning: task '%s' has no command\n", name)
 	}
 
