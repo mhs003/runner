@@ -19,6 +19,12 @@ type Task struct {
 	Condition *Condition
 }
 
+type RunArgs struct {
+	Positional []string
+	Named      map[string]string
+	Flags      map[string]bool
+}
+
 type Condition struct {
 	EnvEquals map[string]string
 }

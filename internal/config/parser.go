@@ -130,3 +130,42 @@ func Parse(lines []Line) (*File, error) {
 
 	return f, nil
 }
+
+// This is a SH!T solution
+// TODO: improve
+func ParseArgs(args []string) RunArgs {
+	ra := RunArgs{
+		Named: make(map[string]string),
+		Flags: make(map[string]bool),
+	}
+
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+
+		if after, ok := strings.CutPrefix(a, "--"); ok {
+			key := after
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				ra.Named["--"+key] = args[i+1]
+				i++
+			} else {
+				ra.Flags["--"+key] = true
+			}
+			continue
+		}
+
+		if strings.HasPrefix(a, "-") && len(a) > 1 {
+			key := strings.TrimPrefix(a, "-")
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				ra.Named["-"+key] = args[i+1]
+				i++
+			} else {
+				ra.Flags["-"+key] = true
+			}
+			continue
+		}
+
+		ra.Positional = append(ra.Positional, a)
+	}
+
+	return ra
+}

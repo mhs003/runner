@@ -8,6 +8,8 @@ import (
 	"mhs003/runner/internal/engine"
 	"os"
 	"runtime"
+	"strconv"
+	"strings"
 )
 
 func main() {
@@ -15,8 +17,10 @@ func main() {
 	flag.Parse()
 
 	taskName := "main" // default task
+	args := flag.Args()
 	if flag.NArg() >= 1 {
 		taskName = flag.Arg(0)
+		args = args[1:]
 	}
 
 	data, _, err := config.Load()
@@ -49,6 +53,23 @@ func main() {
 	vars["CWD"], _ = os.Getwd()
 	vars["OS"] = runtime.GOOS
 	vars["ARCH"] = runtime.GOARCH
+
+	// inject args
+	ra := config.ParseArgs(args)
+
+	vars["ARGS"] = strings.Join(ra.Positional, " ")
+	// positional args
+	for i, v := range ra.Positional {
+		vars[strconv.Itoa(i+1)] = v
+	}
+
+	// named args
+	maps.Copy(vars, ra.Named)
+
+	// flags
+	for k, v := range ra.Flags {
+		vars[k] = strconv.FormatBool(v)
+	}
 
 	seen := map[string]bool{}
 	stack := map[string]bool{}

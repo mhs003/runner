@@ -3,16 +3,22 @@
   BIN="run"
   ENTRY="./cmd/run"
 
+# $ run
 main:
   @ build
 
+# $ run build
 build:
   mkdir -p {{BUILD_DIR}}
+  # supports: go build -o {{BUILD_DIR}}/{{BIN}} {{--entry}}
+  # todo: !go build -o {{BUILD_DIR}}/{{BIN}} {{--entry||ENTRY}}
   !go build -o {{BUILD_DIR}}/{{BIN}} {{ENTRY}}
   # ! = enable verbose
 
+# $ ./build/run install
 install:
   !cp {{BUILD_DIR}}/{{BIN}} ~/.config/hypr/bin/run
 
+# $ run run
 run:
   {{BUILD_DIR}}/{{BIN}}
