@@ -115,7 +115,7 @@ func Parse(lines []Line) (*File, error) {
 					Msg:  fmt.Sprintf("Syntax error: command found outside of a task at line '%d' in '%s'", l.No, l.Text),
 				}
 			}
-			if strings.HasPrefix(l.Text, "$") {
+			if strings.HasPrefix(l.Text, "@") {
 				deps := strings.Fields(l.Text[1:])
 				// push dependencies
 				current.Deps = append(current.Deps, deps...)

@@ -4,11 +4,11 @@
   ENTRY="./cmd/run"
 
 main:
-  $ build
+  @ build
 
 build:
   mkdir -p {{BUILD_DIR}}
-  !go build -o build/{{BIN}} {{ENTRY}}
+  !go build -o {{BUILD_DIR}}/{{BIN}} {{ENTRY}}
   # ! = enable verbose
 
 install:
