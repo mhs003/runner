@@ -27,6 +27,7 @@ func Execute(tasks []*config.Task, vars map[string]string, cats map[string]*conf
 			ec := exec.Command("/bin/sh", "-c", cmd)
 			ec.Stdout = os.Stdout
 			ec.Stderr = os.Stderr
+			ec.Stdin = os.Stdin
 			if err := ec.Run(); err != nil {
 				return err
 			} else {
