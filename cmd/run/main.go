@@ -8,11 +8,13 @@ import (
 	"mhs003/runner/internal/engine"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 )
 
 func main() {
+	showList := flag.Bool("list", false, "Show list of all tasks")
 	dry := flag.Bool("dry", false, "dry run")
 	flag.Parse()
 
@@ -33,6 +35,47 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
+	}
+
+	if *showList {
+		fmt.Println("Available tasks:\n")
+
+		taskNames := make([]string, 0, len(file.Tasks))
+		for name := range file.Tasks {
+			taskNames = append(taskNames, name)
+		}
+		sort.Strings(taskNames)
+
+		for i, name := range taskNames {
+			task := file.Tasks[name]
+
+			fmt.Printf("Task: %s\n", task.Name)
+
+			if len(task.Deps) > 0 {
+				fmt.Printf("  Dependencies: %s\n", strings.Join(task.Deps, ", "))
+			} else {
+				fmt.Println("  Dependencies: none")
+			}
+
+			if len(task.Commands) > 0 {
+				fmt.Println("  Commands:")
+				for i, cmd := range task.Commands {
+					fmt.Printf("    %d. %s\n", i+1, cmd)
+				}
+			} else {
+				fmt.Println("  Commands: none")
+			}
+
+			if task.Condition != nil {
+				fmt.Printf("  Condition: %v\n", task.Condition)
+			}
+
+			if i < len(taskNames)-1 {
+				fmt.Println("---")
+			}
+		}
+		fmt.Println()
+		os.Exit(0)
 	}
 
 	if _, ok := file.Tasks[taskName]; !ok {

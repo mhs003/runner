@@ -21,7 +21,7 @@ func Execute(tasks []*config.Task, vars map[string]string, cats map[string]*conf
 				fmt.Println(cmd)
 				continue
 			}
-			if shouldVerbose == true {
+			if shouldVerbose {
 				fmt.Printf("> %s\n", cmd)
 			}
 			ec := exec.Command("/bin/sh", "-c", cmd)
@@ -30,11 +30,11 @@ func Execute(tasks []*config.Task, vars map[string]string, cats map[string]*conf
 			ec.Stdin = os.Stdin
 			if err := ec.Run(); err != nil {
 				return err
-			} else {
-				if shouldVerbose == true {
+			} /* else {
+				if shouldVerbose {
 					fmt.Println("Complete!")
 				}
-			}
+			} */
 		}
 	}
 	return nil
