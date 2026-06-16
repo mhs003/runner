@@ -1,20 +1,34 @@
 @vars:
   BIN = app
-  TIN = 234623
+  PORT = 8080
 
+# session sharing — shell state persists across lines in a task
 main:
-  $ build dev:backend
-  echo "Done!"
+    MSG="Starting build"
+    echo $MSG
+    @ build --target x86_64
+    @ deploy
 
-hello:
-  echo "test test"
-  echo "hello world"
+# dep arguments — {{--target}} injected into build's vars
+build:
+    echo "building '{{BIN}}' for '{{--target}}'"
+
+deploy:
+    echo "deploying to {{CWD}} on {{OS}}-{{ARCH}}"
+
+# [exit-on-error] — shell exits on first non-zero command
+[exit-on-error]
+test:
+    echo "running tests..."
+    false
+    echo "this never runs"
 
 dev:backend:
-  echo "Backend dev server started at port :9091"
+    echo "Backend dev server started at port :{{PORT}}"
 
 dev:frontend:
-  echo "frontend dev server started at port :3000"
-  
-build:
-  echo "building '{{BIN}}' in '{{CWD}}/build' for '{{OS}}-{{ARCH}}'"
+    echo "frontend dev server started at port :3000"
+
+hello:
+    echo "test test"
+    echo "hello world"
