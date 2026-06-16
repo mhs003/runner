@@ -3,13 +3,6 @@ package config
 type File struct {
 	Vars  map[string]string
 	Tasks map[string]*Task
-	Cats  map[string]*Cat
-}
-
-type Cat struct {
-	Name     string
-	FilePath string
-	Content  string
 }
 
 type Task struct {

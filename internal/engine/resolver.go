@@ -14,13 +14,13 @@ func Resolve(f *config.File, name string, seen map[string]bool, stack map[string
 		return nil
 	}
 
-	if f.Tasks[name].Commands == nil && f.Tasks[name].Deps == nil {
-		fmt.Printf("Warning: task '%s' has no command\n", name)
-	}
-
 	t, ok := f.Tasks[name]
 	if !ok {
 		return fmt.Errorf("Unknown dependency task '%s'", name)
+	}
+
+	if t.Commands == nil && t.Deps == nil {
+		fmt.Printf("Warning: task '%s' has no command\n", name)
 	}
 
 	stack[name] = true

@@ -2,16 +2,9 @@
   BIN = app
   TIN = 234623
 
-@cat:
-  runner_save = .runner
-
 main:
   $ build dev:backend
   echo "Done!"
-
-
-runner_save:
-  echo "{{runner_save}}" > test.txt
 
 hello:
   echo "test test"

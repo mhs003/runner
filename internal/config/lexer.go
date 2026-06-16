@@ -35,7 +35,7 @@ func Lex(input string) []Line {
 		}
 		// skip inline comments from task name and bultin block labels
 		if hashPos := strings.Index(content, "#"); hashPos >= 0 && indent == 0 {
-			content = content[:hashPos]
+			content = strings.TrimSpace(content[:hashPos])
 		}
 		out = append(out, Line{
 			No:     i + 1,

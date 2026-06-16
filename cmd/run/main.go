@@ -38,7 +38,7 @@ func main() {
 	}
 
 	if *showList {
-		fmt.Println("Available tasks:\n")
+		fmt.Println("Available tasks:")
 
 		taskNames := make([]string, 0, len(file.Tasks))
 		for name := range file.Tasks {
@@ -90,9 +90,6 @@ func main() {
 	vars := map[string]string{}
 	maps.Copy(vars, file.Vars)
 
-	cats := map[string]*config.Cat{}
-	maps.Copy(cats, file.Cats)
-
 	vars["CWD"], _ = os.Getwd()
 	vars["OS"] = runtime.GOOS
 	vars["ARCH"] = runtime.GOARCH
@@ -122,7 +119,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := engine.Execute(order, vars, cats, *dry); err != nil {
+	if err := engine.Execute(order, vars, *dry); err != nil {
 		os.Exit(1)
 	}
 }

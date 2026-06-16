@@ -5,10 +5,13 @@ import (
 	"mhs003/runner/internal/config"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
-func Execute(tasks []*config.Task, vars map[string]string, cats map[string]*config.Cat, dry bool) error {
+var tokenRe = regexp.MustCompile(`\{\{(.+?)\}\}`)
+
+func Execute(tasks []*config.Task, vars map[string]string, dry bool) error {
 	for _, t := range tasks {
 		for _, c := range t.Commands {
 			shouldVerbose := false
@@ -16,7 +19,7 @@ func Execute(tasks []*config.Task, vars map[string]string, cats map[string]*conf
 				shouldVerbose = true
 				c = c[1:]
 			}
-			cmd := interpolate(c, vars, cats)
+			cmd := interpolate(c, vars)
 			if dry {
 				fmt.Println(cmd)
 				continue
@@ -30,23 +33,35 @@ func Execute(tasks []*config.Task, vars map[string]string, cats map[string]*conf
 			ec.Stdin = os.Stdin
 			if err := ec.Run(); err != nil {
 				return err
-			} /* else {
-				if shouldVerbose {
-					fmt.Println("Complete!")
-				}
-			} */
+			}
 		}
 	}
 	return nil
 }
 
-func interpolate(s string, vars map[string]string, cats map[string]*config.Cat) string {
-	for k, v := range vars {
-		s = strings.ReplaceAll(s, "{{"+k+"}}", v)
-	}
+func interpolate(s string, vars map[string]string) string {
+	return tokenRe.ReplaceAllStringFunc(s, func(match string) string {
+		inner := match[2 : len(match)-2]
 
-	for name, cat := range cats {
-		s = strings.ReplaceAll(s, "{{"+name+"}}", cat.Content)
-	}
-	return s
+		var primary, fallback string
+		if idx := strings.Index(inner, "||"); idx >= 0 {
+			primary = inner[:idx]
+			fallback = inner[idx+2:]
+		} else {
+			primary = inner
+		}
+
+		if v, ok := vars[primary]; ok && v != "" {
+			return v
+		}
+
+		if fallback != "" {
+			if v, ok := vars[fallback]; ok {
+				return v
+			}
+			return fallback
+		}
+
+		return match
+	})
 }

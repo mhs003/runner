@@ -2,14 +2,12 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
 func Parse(lines []Line) (*File, error) {
 	f := &File{
 		Vars:  map[string]string{},
-		Cats:  map[string]*Cat{},
 		Tasks: map[string]*Task{},
 	}
 
@@ -27,61 +25,23 @@ func Parse(lines []Line) (*File, error) {
 		if strings.HasSuffix(l.Text, ":") && l.Indent == 0 {
 			name := strings.TrimSuffix(l.Text, ":")
 
-			if strings.HasPrefix(name, "@") {
-				if name == "@vars" {
-					j := i + 1
-					for ; j < len(lines); j++ {
-						if lines[j].Indent == 0 {
-							break
-						}
-						if lines[j].Text == "" {
-							continue
-						}
-						parts := strings.SplitN(lines[j].Text, "=", 2)
-						if len(parts) == 2 {
-							f.Vars[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-						}
+			if name == "@vars" {
+				j := i + 1
+				for ; j < len(lines); j++ {
+					if lines[j].Indent == 0 {
+						break
 					}
-					current = nil
-					i = j
-					continue
-				}
-
-				if name == "@cat" {
-					j := i + 1
-					for ; j < len(lines); j++ {
-						if lines[j].Indent == 0 {
-							break
-						}
-						if lines[j].Text == "" {
-							continue
-						}
-						parts := strings.SplitN(lines[j].Text, "=", 2)
-						if len(parts) == 2 {
-							catName := strings.TrimSpace(parts[0])
-							path := strings.TrimSpace(parts[1])
-							content := ""
-
-							if data, err := os.ReadFile(path); err == nil {
-								content = string(data)
-							} else {
-								fmt.Println(err)
-							}
-
-							f.Cats[catName] = &Cat{
-								Name:     catName,
-								FilePath: path,
-								Content:  content,
-							}
-						}
+					if lines[j].Text == "" {
+						continue
 					}
-					current = nil
-					i = j
-					continue
+					parts := strings.SplitN(lines[j].Text, "=", 2)
+					if len(parts) == 2 {
+						f.Vars[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+					}
 				}
-
-				// handle other ... meta blocks
-				// ...
+				current = nil
+				i = j
+				continue
 			}
 
 			// comsume task headers

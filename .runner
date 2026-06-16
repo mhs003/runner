@@ -11,8 +11,7 @@ main:
 build:
   mkdir -p {{BUILD_DIR}}
   # supports: go build -o {{BUILD_DIR}}/{{BIN}} {{--entry}}
-  # todo: !go build -o {{BUILD_DIR}}/{{BIN}} {{--entry||ENTRY}}
-  !go build -o {{BUILD_DIR}}/{{BIN}} {{ENTRY}}
+  !go build -o {{BUILD_DIR}}/{{BIN}} {{--entry||ENTRY}}
   # ! = enable verbose
 
 # $ ./build/run install
