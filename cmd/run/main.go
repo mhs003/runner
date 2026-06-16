@@ -28,7 +28,17 @@ func main() {
 
 	data, err := config.Load(*filePath)
 	if err != nil {
-		panic(err)
+		if *filePath == ".runner" {
+			home, homeErr := os.UserHomeDir()
+			if homeErr == nil {
+				globalPath := home + "/.runner.global"
+				data, err = config.Load(globalPath)
+			}
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "No config found\n")
+		os.Exit(1)
 	}
 
 	lines := config.Lex(string(data))
