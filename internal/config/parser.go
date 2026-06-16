@@ -54,8 +54,13 @@ func (p *parser) parse() error {
 				}
 			}
 			if strings.HasPrefix(l.Text, "@") {
-				deps := strings.Fields(l.Text[1:])
-				p.current.Deps = append(p.current.Deps, deps...)
+				rest := strings.TrimSpace(l.Text[1:])
+				if rest == "exit-on-error" {
+					p.current.ExitOnError = true
+				} else {
+					deps := strings.Fields(rest)
+					p.current.Deps = append(p.current.Deps, deps...)
+				}
 			} else {
 				p.current.Commands = append(p.current.Commands, l.Text)
 			}

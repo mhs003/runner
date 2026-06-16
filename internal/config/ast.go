@@ -6,9 +6,10 @@ type File struct {
 }
 
 type Task struct {
-	Name     string
-	Deps     []string
-	Commands []string
+	Name        string
+	Deps        []string
+	Commands    []string
+	ExitOnError bool
 }
 
 type RunArgs struct {

@@ -13,6 +13,10 @@ var tokenRe = regexp.MustCompile(`\{\{(.+?)\}\}`)
 
 func Execute(tasks []*config.Task, vars map[string]string, dry bool) error {
 	for _, t := range tasks {
+		var script strings.Builder
+		if t.ExitOnError {
+			script.WriteString("set -e\n")
+		}
 		for _, c := range t.Commands {
 			shouldVerbose := false
 			if strings.HasPrefix(c, "!") {
@@ -27,7 +31,11 @@ func Execute(tasks []*config.Task, vars map[string]string, dry bool) error {
 			if shouldVerbose {
 				fmt.Printf("> %s\n", cmd)
 			}
-			ec := exec.Command("/bin/sh", "-c", cmd)
+			script.WriteString(cmd)
+			script.WriteByte('\n')
+		}
+		if script.Len() > 0 && !dry {
+			ec := exec.Command("/bin/sh", "-c", script.String())
 			ec.Stdout = os.Stdout
 			ec.Stderr = os.Stderr
 			ec.Stdin = os.Stdin
