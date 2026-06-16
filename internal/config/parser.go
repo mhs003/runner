@@ -5,127 +5,114 @@ import (
 	"strings"
 )
 
+type parser struct {
+	f       *File
+	lines   []Line
+	current *Task
+}
+
 func Parse(lines []Line) (*File, error) {
-	f := &File{
-		Vars:  map[string]string{},
-		Tasks: map[string]*Task{},
+	p := &parser{
+		f:     &File{Vars: map[string]string{}, Tasks: map[string]*Task{}},
+		lines: lines,
 	}
+	if err := p.parse(); err != nil {
+		return nil, err
+	}
+	return p.f, nil
+}
 
-	var current *Task
-
-	for i := 0; i < len(lines); {
-		l := lines[i]
+func (p *parser) parse() error {
+	for i := 0; i < len(p.lines); {
+		l := p.lines[i]
 		if l.Text == "" {
 			i++
-			// current = nil
 			continue
 		}
 
-		// consume task headers or meta blocks
 		if strings.HasSuffix(l.Text, ":") && l.Indent == 0 {
-			name := strings.TrimSuffix(l.Text, ":")
-
-			if name == "@vars" {
-				j := i + 1
-				for ; j < len(lines); j++ {
-					if lines[j].Indent == 0 {
-						break
-					}
-					if lines[j].Text == "" {
-						continue
-					}
-					parts := strings.SplitN(lines[j].Text, "=", 2)
-					if len(parts) == 2 {
-						f.Vars[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-					}
-				}
-				current = nil
-				i = j
-				continue
+			next, err := p.dispatchHeader(l.Text, i)
+			if err != nil {
+				return err
 			}
-
-			// comsume task headers
-			taskName := name
-			deps := []string{}
-
-			if strings.Contains(name, " ") {
-				parts := strings.SplitN(name, " ", 2)
-				taskName = parts[0]
-				deps = strings.Fields(parts[1])
-			}
-
-			current = &Task{Name: taskName, Deps: deps}
-			f.Tasks[taskName] = current
-			i++
+			i = next
 			continue
 		}
 
-		if l.Indent == 0 && current == nil {
-			return nil, &ParseError{
+		if l.Indent == 0 && p.current == nil {
+			return &ParseError{
 				Line: l.No,
 				Msg:  fmt.Sprintf("Syntax error: unknown keyword '%s' at line '%d'", l.Text, l.No),
 			}
 		}
 
-		// consume task commands
 		if l.Indent > 0 {
-			if current == nil {
-				return nil, &ParseError{
+			if p.current == nil {
+				return &ParseError{
 					Line: l.No,
 					Msg:  fmt.Sprintf("Syntax error: command found outside of a task at line '%d' in '%s'", l.No, l.Text),
 				}
 			}
 			if strings.HasPrefix(l.Text, "@") {
 				deps := strings.Fields(l.Text[1:])
-				// push dependencies
-				current.Deps = append(current.Deps, deps...)
+				p.current.Deps = append(p.current.Deps, deps...)
 			} else {
-				current.Commands = append(current.Commands, l.Text)
+				p.current.Commands = append(p.current.Commands, l.Text)
 			}
 			i++
 			continue
 		}
 		i++
 	}
-
-	return f, nil
+	return nil
 }
 
-// This is a SH!T solution
-// TODO: improve
-func ParseArgs(args []string) RunArgs {
-	ra := RunArgs{
-		Named: make(map[string]string),
-		Flags: make(map[string]bool),
+func (p *parser) dispatchHeader(text string, i int) (int, error) {
+	name := strings.TrimSuffix(text, ":")
+
+	if name == "@vars" {
+		return p.parseVars(i)
 	}
 
-	for i := 0; i < len(args); i++ {
-		a := args[i]
+	return p.parseTaskHeader(name, i)
+}
 
-		if after, ok := strings.CutPrefix(a, "--"); ok {
-			key := after
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				ra.Named["--"+key] = args[i+1]
-				i++
-			} else {
-				ra.Flags["--"+key] = true
-			}
+func (p *parser) parseVars(i int) (int, error) {
+	j := i + 1
+	for ; j < len(p.lines); j++ {
+		if p.lines[j].Indent == 0 {
+			break
+		}
+		if p.lines[j].Text == "" {
 			continue
 		}
-
-		if strings.HasPrefix(a, "-") && len(a) > 1 {
-			key := strings.TrimPrefix(a, "-")
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				ra.Named["-"+key] = args[i+1]
-				i++
-			} else {
-				ra.Flags["-"+key] = true
-			}
-			continue
+		parts := strings.SplitN(p.lines[j].Text, "=", 2)
+		if len(parts) == 2 {
+			p.f.Vars[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
 		}
+	}
+	p.current = nil
+	return j, nil
+}
 
-		ra.Positional = append(ra.Positional, a)
+func (p *parser) parseTaskHeader(name string, i int) (int, error) {
+	taskName := name
+	deps := []string{}
+
+	if strings.Contains(name, " ") {
+		parts := strings.SplitN(name, " ", 2)
+		taskName = strings.TrimSuffix(parts[0], ":")
+		deps = strings.Fields(parts[1])
 	}
 
-	return ra
+	if _, ok := p.f.Tasks[taskName]; ok {
+		return 0, &ParseError{
+			Line: p.lines[i].No,
+			Msg:  fmt.Sprintf("Duplicate task '%s' at line %d", taskName, p.lines[i].No),
+		}
+	}
+
+	p.current = &Task{Name: taskName, Deps: deps}
+	p.f.Tasks[taskName] = p.current
+	return i + 1, nil
 }

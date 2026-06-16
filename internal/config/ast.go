@@ -6,20 +6,15 @@ type File struct {
 }
 
 type Task struct {
-	Name      string
-	Deps      []string
-	Commands  []string
-	Condition *Condition
+	Name     string
+	Deps     []string
+	Commands []string
 }
 
 type RunArgs struct {
 	Positional []string
 	Named      map[string]string
 	Flags      map[string]bool
-}
-
-type Condition struct {
-	EnvEquals map[string]string
 }
 
 type ParseError struct {

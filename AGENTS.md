@@ -27,7 +27,7 @@ executes commands through `/bin/sh -c`.
 | `./build/run --dry <task>` | Dry-run (print commands, no exec) |
 | `./build/run install` | Installs to `~/.config/hypr/bin/run` |
 
-There are **54 test cases** across 4 test files. There is no CI.
+There are **62 test cases** across 5 test files. There is no CI.
 
 ---
 
@@ -74,12 +74,14 @@ There are **54 test cases** across 4 test files. There is no CI.
 ```
 cmd/run/main.go            — CLI entry, flag parsing, orchestration
 internal/config/
-  ast.go                   — Type definitions: File, Task, Condition, RunArgs
+  ast.go                   — Type definitions: File, Task, RunArgs, ParseError
   lexer.go                 — Text → []Line (indent tracking, comment stripping)
   lexer_test.go            — Lexer unit tests
-  parser.go                — []Line → *File AST + ParseArgs helper
-  parser_test.go           — Parser + ParseArgs unit tests
-  loader.go                — Reads .runner from CWD
+  parser.go                — []Line → *File AST (dispatched parser methods)
+  parser_test.go           — Parser unit tests
+  args.go                  — ParseArgs CLI argument parser
+  args_test.go             — ParseArgs unit tests
+  loader.go                — Reads .runner from given path
 internal/engine/
   resolver.go              — Topological sort of task DAG with cycle detection
   resolver_test.go         — Resolver unit tests
@@ -110,28 +112,19 @@ CLI args ──→ ParseArgs ──→ vars map ──────────�
 
 ## Important Gotchas
 
-1. **`ParseArgs` is marked "SH!T solution"** (`parser.go:94-131`) with a TODO. It doesn't support
-   `--key=value` syntax, combined short flags, or `=` in flag values. Be careful when modifying.
-
-2. **`Condition` field in `Task` is dead code** — defined in `ast.go` but never populated or
-   checked during execution. It's a planned feature (conditional execution based on env vars).
-
-3. **`loader.go` returns a path that is ignored** — `Load()` returns `([]byte, string, error)`
-   but `main.go` discards the path with `_`. The path return exists but isn't used.
-
-4. **Indentation is space-based** — the lexer counts individual space characters. Tabs would be
+1. **Indentation is space-based** — the lexer counts individual space characters. Tabs would be
    treated as indent level 1. The convention is 2-space indentation.
 
-5. **Quotes in `.runner` are literal** — `BIN="run"` stores `"run"` (with quotes) as the variable
+2. **Quotes in `.runner` are literal** — `BIN="run"` stores `"run"` (with quotes) as the variable
    value. It's up to the shell command to handle quotes.
 
-6. **No `--keep-going` on error** — if any command fails, execution stops immediately.
+3. **No `--keep-going` on error** — if any command fails, execution stops immediately.
    Subsequent tasks in the resolved order are skipped.
 
-7. **Stdio is fully passthrough** — commands inherit stdin/stdout/stderr from the parent process.
+4. **Stdio is fully passthrough** — commands inherit stdin/stdout/stderr from the parent process.
    Good for interactive commands but means there's no output capture.
 
-8. **Variable interpolation uses regex** — the `interpolate()` function in `executor.go` uses
+5. **Variable interpolation uses regex** — the `interpolate()` function in `executor.go` uses
    `regexp.MustCompile(\{\{(.+?)\}\})` to find all `{{...}}` tokens and resolve them individually.
    This avoids the substring corruption problem of naive `ReplaceAll`. The `{{key||default}}`
    syntax provides a fallback: if `key` is not found or empty, `default` is used (resolved as
@@ -141,22 +134,22 @@ CLI args ──→ ParseArgs ──→ vars map ──────────�
 
 ## Modifying `.runner` Format
 
-The parser currently only supports `@vars:` as a meta block. To add a new meta block
-(`@something:`), follow the existing pattern at `parser.go:28-45`:
+The parser currently supports `@vars` as the only meta block. To add a new meta block
+(`@something:`):
 
-1. Detect the block header by name at indent 0
-2. Scan forward consuming indented lines until the next indent-0 line
-3. Reset `current = nil`
-4. Advance the outer loop index past the block
+1. Add a `parseXxx()` method to the `parser` struct following the `parseVars()` pattern.
+2. Add a branch in `parser.dispatchHeader()` for the new block name.
+3. The `parser.parse()` loop will dispatch automatically.
 
 ---
 
 ## Common Pitfalls When Editing
 
 - **Adding a new type?** Put it in `ast.go` — that's the single source of truth for types.
-- **New meta block?** Add the parsing logic in `parser.go` in the `@` block section.
+- **New meta block?** Add a `parseXxx()` method to the `parser` struct and a branch in `dispatchHeader()`.
 - **New CLI flag?** Use `flag` stdlib in `main.go`, then add it to the vars map before resolve.
 - **New built-in variable?** Add it in `main.go` around lines 96-98 where `CWD`/`OS`/`ARCH` are set.
-- **Changing the lexer?** Make sure to preserve the comment stripping rules (full-line `<literal>#</literal>` vs inline at indent 0).
+- **Changing the lexer?** Make sure to preserve the comment stripping rules (full-line `#` vs inline at indent 0).
 - **Adding execution features?** Modify `executor.go` — that's the sole execution engine.
 - **Adding tests?** Put them in the same package with `_test.go` suffix. Use table-driven tests.
+- **ParseArgs lives in `args.go`** — it's a standalone function with its own test file `args_test.go`.

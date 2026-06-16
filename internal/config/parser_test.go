@@ -2,6 +2,7 @@ package config
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -91,11 +92,9 @@ func TestParseTaskWithDeps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// TrimSuffix only removes final ':', so "build: dep1 dep2:" → name="build: dep1 dep2"
-	// Then SplitN(" ", 2) → ["build:", "dep1 dep2"], taskName="build:"
-	task, ok := f.Tasks["build:"]
+	task, ok := f.Tasks["build"]
 	if !ok {
-		t.Fatalf("expected task 'build:' to exist, got tasks: %v", f.Tasks)
+		t.Fatalf("expected task 'build' to exist, got tasks: %v", f.Tasks)
 	}
 	expected := []string{"dep1", "dep2"}
 	if !reflect.DeepEqual(task.Deps, expected) {
@@ -194,88 +193,16 @@ func TestParseErrorCommandOutsideTask(t *testing.T) {
 	}
 }
 
-// ParseArgs tests
-
-func TestParseArgsEmpty(t *testing.T) {
-	ra := ParseArgs([]string{})
-	if len(ra.Positional) != 0 {
-		t.Fatalf("expected 0 positional, got %d", len(ra.Positional))
+func TestParseDuplicateTask(t *testing.T) {
+	_, err := Parse(lex("build:\n  echo first\nbuild:\n  echo second"))
+	if err == nil {
+		t.Fatal("expected error for duplicate task, got nil")
 	}
-	if len(ra.Named) != 0 {
-		t.Fatalf("expected 0 named, got %d", len(ra.Named))
+	pe, ok := err.(*ParseError)
+	if !ok {
+		t.Fatalf("expected *ParseError, got %T", err)
 	}
-	if len(ra.Flags) != 0 {
-		t.Fatalf("expected 0 flags, got %d", len(ra.Flags))
-	}
-}
-
-func TestParseArgsPositional(t *testing.T) {
-	ra := ParseArgs([]string{"foo", "bar"})
-	expected := []string{"foo", "bar"}
-	if !reflect.DeepEqual(ra.Positional, expected) {
-		t.Fatalf("expected positional %v, got %v", expected, ra.Positional)
-	}
-}
-
-func TestParseArgsNamed(t *testing.T) {
-	ra := ParseArgs([]string{"--entry", "./cmd/app"})
-	if ra.Named["--entry"] != "./cmd/app" {
-		t.Fatalf("expected --entry=./cmd/app, got --entry=%s", ra.Named["--entry"])
-	}
-}
-
-func TestParseArgsShortNamed(t *testing.T) {
-	ra := ParseArgs([]string{"-e", "./cmd/app"})
-	if ra.Named["-e"] != "./cmd/app" {
-		t.Fatalf("expected -e=./cmd/app, got -e=%s", ra.Named["-e"])
-	}
-}
-
-func TestParseArgsFlag(t *testing.T) {
-	ra := ParseArgs([]string{"--verbose"})
-	if !ra.Flags["--verbose"] {
-		t.Fatal("expected --verbose flag to be true")
-	}
-}
-
-func TestParseArgsShortFlag(t *testing.T) {
-	ra := ParseArgs([]string{"-v"})
-	if !ra.Flags["-v"] {
-		t.Fatal("expected -v flag to be true")
-	}
-}
-
-func TestParseArgsFlagAfterFlag(t *testing.T) {
-	ra := ParseArgs([]string{"--verbose", "--dry"})
-	if !ra.Flags["--verbose"] || !ra.Flags["--dry"] {
-		t.Fatal("expected both flags to be true")
-	}
-}
-
-func TestParseArgsFlagThenNamed(t *testing.T) {
-	ra := ParseArgs([]string{"--dry", "--entry", "main"})
-	if !ra.Flags["--dry"] {
-		t.Fatal("expected --dry flag")
-	}
-	if ra.Named["--entry"] != "main" {
-		t.Fatalf("expected --entry=main, got %s", ra.Named["--entry"])
-	}
-}
-
-func TestParseArgsMixed(t *testing.T) {
-	// --dry followed by --entry treats --dry as a flag (next is another flag)
-	ra := ParseArgs([]string{"--dry", "--entry", "./cmd/app", "build", "-v"})
-	if !ra.Flags["--dry"] {
-		t.Fatal("expected --dry flag")
-	}
-	if ra.Named["--entry"] != "./cmd/app" {
-		t.Fatalf("expected --entry=./cmd/app, got %s", ra.Named["--entry"])
-	}
-	if !ra.Flags["-v"] {
-		t.Fatal("expected -v flag")
-	}
-	expected := []string{"build"}
-	if !reflect.DeepEqual(ra.Positional, expected) {
-		t.Fatalf("expected positional %v, got %v", expected, ra.Positional)
+	if !strings.Contains(pe.Msg, "Duplicate task") {
+		t.Fatalf("expected 'Duplicate task' in error, got '%s'", pe.Msg)
 	}
 }

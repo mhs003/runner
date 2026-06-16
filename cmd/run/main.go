@@ -16,6 +16,7 @@ import (
 func main() {
 	showList := flag.Bool("list", false, "Show list of all tasks")
 	dry := flag.Bool("dry", false, "dry run")
+	filePath := flag.String("file", ".runner", "Path to runner config file")
 	flag.Parse()
 
 	taskName := "main" // default task
@@ -25,7 +26,7 @@ func main() {
 		args = args[1:]
 	}
 
-	data, _, err := config.Load()
+	data, err := config.Load(*filePath)
 	if err != nil {
 		panic(err)
 	}
@@ -64,10 +65,6 @@ func main() {
 				}
 			} else {
 				fmt.Println("  Commands: none")
-			}
-
-			if task.Condition != nil {
-				fmt.Printf("  Condition: %v\n", task.Condition)
 			}
 
 			if i < len(taskNames)-1 {

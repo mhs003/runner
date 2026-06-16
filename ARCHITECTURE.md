@@ -6,8 +6,8 @@
 custom DSL inspired by `just`/`Make`), parses it with a hand-written lexer and parser, resolves
 inter-task dependencies via topological sort, and executes shell commands through `/bin/sh -c`.
 
-The entire project is ~500 lines of Go, spread across 7 files in 3 packages. There are no external
-dependencies, no test files, and no CI.
+The entire project is ~600 lines of Go, spread across 9 files in 3 packages (plus 5 test files).
+There are no external dependencies and no CI.
 
 ---
 
@@ -51,7 +51,7 @@ dependencies, no test files, and no CI.
 
 | Stage | File | Input | Output | Description |
 |-------|------|-------|--------|-------------|
-| 1. Load | `loader.go` | file system | `[]byte` | Reads `.runner` from CWD. Returns path string that's never used. |
+| 1. Load | `loader.go` | file system | `[]byte` | Reads config file from given path. |
 | 2. Lex | `lexer.go` | raw text | `[]Line` | Splits by newlines, counts leading spaces as indent, strips comments. |
 | 3. Parse | `parser.go` | `[]Line` | `*File` | Builds AST: detects `@vars` meta block, task headers, inline deps, commands. |
 | 4. Inject | `main.go` | `*File` + CLI | `map[string]string` | Merges file vars, built-ins (`CWD`, `OS`, `ARCH`), CLI positional/named/flag args. |
@@ -62,14 +62,14 @@ dependencies, no test files, and no CI.
 
 ## Package Map
 
-### `cmd/run/main.go` (125 lines) — Entry Point
+### `cmd/run/main.go` (130 lines) — Entry Point
 
 **Responsibility:** CLI orchestration.
 
 ```
 main()
-  ├── flag.Parse()              // --list, --dry
-  ├── config.Load()             // read .runner
+  ├── flag.Parse()              // --list, --dry, --file
+  ├── config.Load(path)         // read .runner (or custom --file path)
   ├── config.Lex()              // tokenize
   ├── config.Parse()            // build AST
   ├── [--list: print tasks, exit]
@@ -93,7 +93,7 @@ main()
 
 ---
 
-### `internal/config/ast.go` (32 lines) — Type Definitions
+### `internal/config/ast.go` (25 lines) — Type Definitions
 
 **Responsibility:** Single source of truth for all data types in the project.
 
@@ -104,20 +104,15 @@ type File struct {
 }
 
 type Task struct {
-    Name      string           // unique identifier
-    Deps      []string         // dependency task names
-    Commands  []string         // shell commands (in order)
-    Condition *Condition       // DEAD CODE — never populated/checked
+    Name     string           // unique identifier
+    Deps     []string         // dependency task names
+    Commands []string         // shell commands (in order)
 }
 
 type RunArgs struct {
     Positional []string         // non-flag arguments
     Named      map[string]string // --key value / -k value
     Flags      map[string]bool   // --flag / -f (no value)
-}
-
-type Condition struct {
-    EnvEquals map[string]string  // env var → expected value (planned)
 }
 
 type ParseError struct {
@@ -130,8 +125,6 @@ func (e *ParseError) Error() string
 **Design notes:**
 - `File` uses `map[string]*Task` not `map[string]Task` — pointers enable mutation via shared
   references (used in resolver when appending to `[]*Task`).
-- `Condition` and its `EnvEquals` map are **defined but never used**. This is forward-looking
-  — the intent is to support conditional task execution based on environment variables.
 - `ParseError` implements the `error` interface. The `Line` field is populated by the parser
   but never read by the caller (`main.go` just prints `err.Error()`).
 - `RunArgs` is the result of `ParseArgs()`, consumed immediately in `main.go`. It's not stored
@@ -175,32 +168,26 @@ type Line struct {
 
 ---
 
-### `internal/config/parser.go` (131 lines) — Parser
+### `internal/config/parser.go` (95 lines) — Parser
 
-**Responsibility:** Convert `[]Line` into `*File` AST. Also contains `ParseArgs` for CLI arguments.
+**Responsibility:** Convert `[]Line` into `*File` AST.
 
 **Architecture:**
 
-The parser is a hand-written single-pass state machine. It maintains a `current *Task` pointer
-that tracks which task definition is being populated.
+The parser is a hand-written single-pass state machine using dispatched methods on a
+`parser` struct. It maintains a `current *Task` pointer and an index `i` for scanning.
 
 ```
-Parse(lines):
+parse(lines):
   f = &File{}
-  current = nil
+  p = parser{f: f, lines: lines}
 
-  for i over lines:
+  for p.i over lines:
     if line is empty → continue
 
     if line ends with ':' at indent 0:
       → BLOCK HEADER
-      if name is "@vars":
-        scan forward, parse key=value, store in f.Vars
-      else:
-        → TASK HEADER
-        parse "name:" or "name: dep1 dep2"
-        current = &Task{Name, Deps}
-        f.Tasks[name] = current
+      dispatchHeader(name)  // delegates to parseVars or parseTaskHeader
 
     if indent > 0:
       if current is nil → error: command outside task
@@ -212,6 +199,12 @@ Parse(lines):
         append raw line to current.Commands
 ```
 
+**Parsing methods:**
+- `parseVars()` — scans forward, parses `key=value`, stores in `f.Vars`.
+- `parseTaskHeader()` — parses `"name: dep1 dep2:"` into task name and deps.
+  Uses `strings.TrimSuffix(parts[0], ":")` so task name never includes trailing `:`.
+- `dispatchHeader()` — routes `@vars` to `parseVars()`, all other headers to `parseTaskHeader()`.
+
 **`@vars:` block parsing:**
 - Lines within `@vars:` are split on first `=`.
 - Both key and value are `TrimSpace`-d.
@@ -220,33 +213,36 @@ Parse(lines):
 
 **Task header parsing:**
 - A task header `taskname:` at indent 0 creates a task.
-- If the header has spaces: `taskname: dep1 dep2` or `taskname dep1 dep2`, the parts after
+- If the header has spaces: `taskname: dep1 dep2`: the parts after
   the first word are treated as dependency names (split by `strings.Fields`).
-- The `:` may appear after the task name or at the end of the full header — both work.
+- Trailing colons on dep names are trimmed (`build: dep1 dep2:` → name=`"build"`, deps=`["dep1", "dep2"]`).
+- Duplicate task names return a `ParseError`.
 
 **Inline dependencies:**
 - Within a task body, `@depname` adds `depname` to the current task's `Deps` list.
 - Multiple deps can be on one line: `@ dep1 dep2` (after stripping `@`, `strings.Fields`
   splits the rest).
 
-**`ParseArgs` function (lines 94-131):**
+---
 
-Status: **Marked "SH!T solution"** with a `TODO: improve` comment.
+### `internal/config/args.go` (45 lines) — CLI Argument Parser
 
-```
-ParseArgs(args):
-  for each arg:
-    --key value  → Named["--key"] = value
-    --flag       → Flags["--flag"] = true
-    -k value     → Named["-k"] = value
-    -f           → Flags["-f"] = true
-    otherwise    → Positional.append(arg)
+**Responsibility:** Parse CLI arguments into `RunArgs` struct (positional, named, flags).
+
+```go
+func ParseArgs(args []string) RunArgs
 ```
 
-Limitations:
-- No `--key=value` syntax support.
-- No combined short flags (`-abc`).
-- Doesn't handle `=` in flag values.
+**Features:**
+- `--key value` and `-k value` → `Named["--key"]` / `Named["-k"]`
+- `--key=value` → `Named["--key"]` (via `strings.Cut`)
+- `--flag` and `-f` → `Flags["--flag"]` / `Flags["-f"]` (boolean)
+- Combined short flags: `-abc` → `Flags["-a"]`, `Flags["-b"]`, `Flags["-c"]`
+- `=` in values: `--path=/usr/bin` works correctly (value is `/usr/bin`)
+- Positional args: anything that doesn't start with `-`
+
+**Limitations:**
+- No combined short flags with values (`-k value` must be separate tokens).
 - If `--key` is followed by another flag (`--key --other`), `--key` is treated as a flag
   (boolean), not as a named arg. This is intentional but restrictive.
 - Named keys preserve the `--` or `-` prefix, so accessing them in `.runner` requires
@@ -254,24 +250,20 @@ Limitations:
 
 ---
 
-### `internal/config/loader.go` (21 lines) — File Loader
+### `internal/config/loader.go` (15 lines) — File Loader
 
-**Responsibility:** Read `.runner` from the current working directory.
+**Responsibility:** Read config file from given path.
 
 ```go
-func Load() ([]byte, string, error) {
-    cwd, _ := os.Getwd()
-    path := filepath.Join(cwd, ".runner")
-    data, err := os.ReadFile(path)
-    return data, path, err
+func Load(path string) ([]byte, error) {
+    return os.ReadFile(path)
 }
 ```
 
 **Design choices:**
-- Always reads from CWD — no upward directory search, no `-f` flag for custom paths.
-- Returns the path as a second return value, but `main.go` discards it with `_`.
-  The path return appears to be a leftover from a previous design or future-proofing.
-- No fallback if `.runner` doesn't exist — `os.ReadFile` error propagates directly.
+- Takes explicit path parameter (set by `--file` flag or default `.runner` in `main.go`).
+- No upward directory search — `--file` enables custom paths.
+- No fallback if file doesn't exist — `os.ReadFile` error propagates directly.
 
 ---
 
@@ -458,30 +450,22 @@ lint:
 | Custom file format (not YAML/TOML) | Minimal, task-runner-specific syntax | Steep learning curve, no ecosystem tooling |
 | `/bin/sh -c` execution | Shell features work (pipes, redirects) | Shell injection, platform-specific |
 | Regex-based variable interpolation | Avoids substring corruption, enables fallback syntax | Regex compile cost (one-time) vs naive ReplaceAll |
-| No tests | Pre-alpha, personal tool | No safety net for refactoring |
+| 62 unit tests across 5 files | Safety net for refactoring | No integration or end-to-end tests |
 | Sequential execution (no `--keep-going`) | Simplicity | First failure aborts all remaining tasks |
-| Hardcoded `.runner` filename | Simplicity | No custom config paths |
+| `--file` flag for custom config paths | Flexibility without breaking default | No upward directory search |
 | 2-space indentation | Visual clarity | Tab = 1 indent (breaks convention) |
 
 ---
 
 ## Known Issues & TODOs
 
-1. **`ParseArgs` quality** (`parser.go:94`): Doesn't support `--key=value`, combined flags,
-   or `=` in values. Marked as "SH!T solution" by the author.
-
-2. **`Condition` dead code** (`ast.go`): Field is defined but never populated or checked.
-   The intent is conditional execution based on env vars; implementing this would require
-   changes to the parser and executor.
-
-3. **`loader.go` unused path return**: `Load()` returns a path string that is never consumed
-   by the caller. Clean up or use it for error messages.
-
-4. **No `--help` flag**: `flag` package auto-generates basic help, but there's no explicit
+1. **No `--help` flag**: `flag` package auto-generates basic help, but there's no explicit
    `--help` handling.
 
-5. **No config path flag**: Can't specify a custom `.runner` file path.
-
-6. **Fallback syntax edge case**: `{{key||default}}` resolves `default` as a var key first,
+2. **Fallback syntax edge case**: `{{key||default}}` resolves `default` as a var key first,
    then as a literal. If a var exists with the same name as the intended literal, the var
    takes precedence. This is intentional but could surprise users.
+
+3. **ParseArgs combined flag limitation**: Combined short flags (`-abc`) set all as boolean
+   flags. There's no support for combined short flags with values (e.g., `-o value` must be
+   separate tokens).
