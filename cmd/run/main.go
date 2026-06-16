@@ -76,7 +76,11 @@ func main() {
 			fmt.Printf("Task: %s\n", task.Name)
 
 			if len(task.Deps) > 0 {
-				fmt.Printf("  Dependencies: %s\n", strings.Join(task.Deps, ", "))
+				depNames := make([]string, len(task.Deps))
+				for i, d := range task.Deps {
+					depNames[i] = d.Name
+				}
+				fmt.Printf("  Dependencies: %s\n", strings.Join(depNames, ", "))
 			} else {
 				fmt.Println("  Dependencies: none")
 			}

@@ -18,7 +18,11 @@ func makeTasks(tasks ...config.Task) *config.File {
 	return f
 }
 
-func task(name string, deps ...string) config.Task {
+func task(name string, depNames ...string) config.Task {
+	deps := make([]config.Dep, len(depNames))
+	for i, dn := range depNames {
+		deps[i] = config.Dep{Name: dn}
+	}
 	return config.Task{Name: name, Deps: deps}
 }
 

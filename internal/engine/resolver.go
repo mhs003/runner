@@ -26,7 +26,7 @@ func Resolve(f *config.File, name string, seen map[string]bool, stack map[string
 	stack[name] = true
 
 	for _, d := range t.Deps {
-		if err := Resolve(f, d, seen, stack, out); err != nil {
+		if err := Resolve(f, d.Name, seen, stack, out); err != nil {
 			return err
 		}
 	}

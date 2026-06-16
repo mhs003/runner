@@ -6,13 +6,40 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 var tokenRe = regexp.MustCompile(`\{\{(.+?)\}\}`)
 
 func Execute(tasks []*config.Task, vars map[string]string, dry bool) error {
+	depArgs := map[string][]string{}
 	for _, t := range tasks {
+		for _, d := range t.Deps {
+			if len(d.Args) > 0 {
+				depArgs[d.Name] = d.Args
+			}
+		}
+	}
+
+	for _, t := range tasks {
+		var cleanup []string
+		if args, ok := depArgs[t.Name]; ok {
+			ra := config.ParseArgs(args)
+			for k, v := range ra.Named {
+				if _, exists := vars[k]; !exists {
+					cleanup = append(cleanup, k)
+				}
+				vars[k] = v
+			}
+			for k, v := range ra.Flags {
+				if _, exists := vars[k]; !exists {
+					cleanup = append(cleanup, k)
+				}
+				vars[k] = strconv.FormatBool(v)
+			}
+		}
+
 		var script strings.Builder
 		if t.ExitOnError {
 			script.WriteString("set -e\n")
@@ -42,6 +69,10 @@ func Execute(tasks []*config.Task, vars map[string]string, dry bool) error {
 			if err := ec.Run(); err != nil {
 				return err
 			}
+		}
+
+		for _, k := range cleanup {
+			delete(vars, k)
 		}
 	}
 	return nil

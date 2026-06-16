@@ -87,6 +87,14 @@ func TestParseSingleTask(t *testing.T) {
 	}
 }
 
+func deps(depNames ...string) []Dep {
+	d := make([]Dep, len(depNames))
+	for i, n := range depNames {
+		d[i] = Dep{Name: n}
+	}
+	return d
+}
+
 func TestParseTaskWithDeps(t *testing.T) {
 	f, err := Parse(lex("build: dep1 dep2:\n  echo hello"))
 	if err != nil {
@@ -96,7 +104,7 @@ func TestParseTaskWithDeps(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected task 'build' to exist, got tasks: %v", f.Tasks)
 	}
-	expected := []string{"dep1", "dep2"}
+	expected := deps("dep1", "dep2")
 	if !reflect.DeepEqual(task.Deps, expected) {
 		t.Fatalf("expected deps %v, got %v", expected, task.Deps)
 	}
@@ -108,9 +116,52 @@ func TestParseInlineDeps(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	task := f.Tasks["build"]
-	expected := []string{"dep1", "dep2"}
+	expected := deps("dep1", "dep2")
 	if !reflect.DeepEqual(task.Deps, expected) {
 		t.Fatalf("expected deps %v, got %v", expected, task.Deps)
+	}
+}
+
+func TestParseDepWithArgs(t *testing.T) {
+	f, err := Parse(lex("main:\n  @ build --target x86_64"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := []Dep{{Name: "build", Args: []string{"--target", "x86_64"}}}
+	if !reflect.DeepEqual(f.Tasks["main"].Deps, expected) {
+		t.Fatalf("expected deps %v, got %v", expected, f.Tasks["main"].Deps)
+	}
+}
+
+func TestParseDepWithFlags(t *testing.T) {
+	f, err := Parse(lex("main:\n  @ test --all --verbose"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := []Dep{{Name: "test", Args: []string{"--all", "--verbose"}}}
+	if !reflect.DeepEqual(f.Tasks["main"].Deps, expected) {
+		t.Fatalf("expected deps %v, got %v", expected, f.Tasks["main"].Deps)
+	}
+}
+
+func TestParseDepWithNoArgs(t *testing.T) {
+	f, err := Parse(lex("main:\n  @ build\n  @test"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := []Dep{{Name: "build"}, {Name: "test"}}
+	if !reflect.DeepEqual(f.Tasks["main"].Deps, expected) {
+		t.Fatalf("expected deps %v, got %v", expected, f.Tasks["main"].Deps)
+	}
+}
+
+func TestParseDepWithLeadingSpaceOnly(t *testing.T) {
+	f, err := Parse(lex("main:\n  @"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(f.Tasks["main"].Deps) != 0 {
+		t.Fatalf("expected 0 deps, got %d", len(f.Tasks["main"].Deps))
 	}
 }
 

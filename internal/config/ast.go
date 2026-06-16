@@ -5,9 +5,14 @@ type File struct {
 	Tasks map[string]*Task
 }
 
+type Dep struct {
+	Name string
+	Args []string
+}
+
 type Task struct {
 	Name        string
-	Deps        []string
+	Deps        []Dep
 	Commands    []string
 	ExitOnError bool
 }

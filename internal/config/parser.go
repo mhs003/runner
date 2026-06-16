@@ -70,8 +70,15 @@ func (p *parser) parse() error {
 				}
 			}
 			if strings.HasPrefix(l.Text, "@") {
-				deps := strings.Fields(strings.TrimSpace(l.Text[1:]))
-				p.current.Deps = append(p.current.Deps, deps...)
+				rest := strings.TrimSpace(l.Text[1:])
+				if rest != "" {
+					parts := strings.Fields(rest)
+					d := Dep{Name: parts[0]}
+					if len(parts) > 1 {
+						d.Args = parts[1:]
+					}
+					p.current.Deps = append(p.current.Deps, d)
+				}
 			} else {
 				p.current.Commands = append(p.current.Commands, l.Text)
 			}
@@ -113,12 +120,15 @@ func (p *parser) parseVars(i int) (int, error) {
 
 func (p *parser) parseTaskHeader(name string, i int) (int, error) {
 	taskName := name
-	deps := []string{}
+	deps := []Dep{}
 
 	if strings.Contains(name, " ") {
 		parts := strings.SplitN(name, " ", 2)
 		taskName = strings.TrimSuffix(parts[0], ":")
-		deps = strings.Fields(parts[1])
+		depNames := strings.Fields(parts[1])
+		for _, dn := range depNames {
+			deps = append(deps, Dep{Name: dn})
+		}
 	}
 
 	if _, ok := p.f.Tasks[taskName]; ok {
