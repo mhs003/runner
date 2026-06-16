@@ -116,11 +116,14 @@ and `-file` uses the default value.
 ## Install
 
 ```
-make install
+./run install
 ```
 
 Copies the binary to `~/.local/bin/run`.
 
 ---
 
-[github.com/mhs003/runner](https://github.com/mhs003/runner) — MIT license.
+
+## License
+
+MIT (See [LICENSE](https://github.com/mhs003/runner/blob/master/LICENSE) file).
