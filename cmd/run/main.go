@@ -17,7 +17,20 @@ func main() {
 	showList := flag.Bool("list", false, "Show list of all tasks")
 	dry := flag.Bool("dry", false, "dry run")
 	filePath := flag.String("file", ".runner", "Path to runner config file")
+	doInit := flag.Bool("init", false, "Initialize a .runner file in current directory")
 	flag.Parse()
+
+	if *doInit {
+		if _, err := os.Stat(".runner"); err == nil {
+			fmt.Fprintf(os.Stderr, "Error: .runner already exists in the current directory\n")
+			os.Exit(1)
+		}
+		content := []byte("main:\n    echo \"I am running\"\n\n# Runner: https://github.com/mhs003/runner\n")
+		if err := os.WriteFile(".runner", content, 0644); err != nil {
+			panic(err)
+		}
+		os.Exit(0)
+	}
 
 	taskName := "main" // default task
 	args := flag.Args()
