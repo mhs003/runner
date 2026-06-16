@@ -6,7 +6,7 @@
 custom DSL inspired by `just`/`Make`), parses it with a hand-written lexer and parser, resolves
 inter-task dependencies via topological sort, and executes shell commands through `/bin/sh -c`.
 
-The entire project is ~600 lines of Go, spread across 9 files in 3 packages (plus 5 test files).
+The entire project is ~640 lines of Go, spread across 8 source files in 3 packages (plus 5 test files).
 There are no external dependencies and no CI.
 
 ---
@@ -40,11 +40,12 @@ There are no external dependencies and no CI.
                                      └──────────────┬───────────────┘
                                                     │
                                                     ▼
-                                     ┌──────────────────────────────┐
-                                     │        Execute               │
-                                     │  /bin/sh -c per command      │
-                                     │  interpolation + verbose     │
-                                     └──────────────────────────────┘
+                                      ┌──────────────────────────────┐
+                                      │        Execute               │
+                                      │  collectCommands → combine   │
+                                      │  single /bin/sh -c per task  │
+                                      │  interpolation + verbose     │
+                                      └──────────────────────────────┘
 ```
 
 ### Stage Details
@@ -53,26 +54,27 @@ There are no external dependencies and no CI.
 |-------|------|-------|--------|-------------|
 | 1. Load | `loader.go` | file system | `[]byte` | Reads config file from given path. |
 | 2. Lex | `lexer.go` | raw text | `[]Line` | Splits by newlines, counts leading spaces as indent, strips comments. |
-| 3. Parse | `parser.go` | `[]Line` | `*File` | Builds AST: detects `@vars` meta block, task headers, inline deps, commands. |
+| 3. Parse | `parser.go` | `[]Line` | `*File` | Builds AST: detects `@vars` meta block, task headers (with `HeaderDeps`), body lines (typed `cmd` or `dep` with args), `[exit-on-error]` annotations. |
 | 4. Inject | `main.go` | `*File` + CLI | `map[string]string` | Merges file vars, built-ins (`CWD`, `OS`, `ARCH`), CLI positional/named/flag args. |
-| 5. Resolve | `resolver.go` | `*File` + task name | `[]*Task` (ordered) | DFS topological sort with cycle detection via `stack` map. |
-| 6. Execute | `executor.go` | ordered tasks + vars | exit code | For each command: interpolate vars, optionally print, run via `/bin/sh -c`. |
+| 5. Resolve | `resolver.go` | `*File` + task name | `[]*Task` (ordered) | DFS topological sort on `HeaderDeps` only with cycle detection via `stack` map. |
+| 6. Execute | `executor.go` | ordered tasks + vars | exit code | `collectCommands` recursively gathers commands from body lines (inlining `@ dep` calls), builds one combined script per task, runs via `/bin/sh -c`. |
 
 ---
 
 ## Package Map
 
-### `cmd/run/main.go` (130 lines) — Entry Point
+### `cmd/run/main.go` (158 lines) — Entry Point
 
 **Responsibility:** CLI orchestration.
 
 ```
 main()
-  ├── flag.Parse()              // --list, --dry, --file
-  ├── config.Load(path)         // read .runner (or custom --file path)
+  ├── flag.Parse()              // --list, --dry, --file, --init
+  ├── [--init: scaffold .runner, exit]
+  ├── config.Load(path)         // read .runner (or ~/.runner.global fallback)
   ├── config.Lex()              // tokenize
   ├── config.Parse()            // build AST
-  ├── [--list: print tasks, exit]
+  ├── [--list: print tasks with BodyLines, exit]
   ├── [validate task exists]
   ├── build vars map
   │   ├── maps.Copy(file.Vars)            // from .runner @vars
@@ -81,7 +83,7 @@ main()
   │   ├── maps.Copy(ra.Named)             // --key value pairs
   │   └── ra.Flags → "true"/"false"       // boolean flags
   ├── engine.Resolve()                    // topological sort
-  └── engine.Execute()                    // run commands
+  └── engine.Execute(file, order, vars)   // run commands
 ```
 
 **Key design choices:**
@@ -93,7 +95,7 @@ main()
 
 ---
 
-### `internal/config/ast.go` (25 lines) — Type Definitions
+### `internal/config/ast.go` (39 lines) — Type Definitions
 
 **Responsibility:** Single source of truth for all data types in the project.
 
@@ -103,10 +105,22 @@ type File struct {
     Tasks map[string]*Task     // task name → Task (pointer)
 }
 
+type Dep struct {
+    Name string               // dependency task name
+    Args []string             // per-call dep arguments (e.g. --target x86_64)
+}
+
+type BodyLine struct {
+    Type string               // "cmd" or "dep"
+    Text string               // command text (with ! prefix) or dep name
+    Args []string             // dep arguments (only for "dep" type)
+}
+
 type Task struct {
-    Name     string           // unique identifier
-    Deps     []string         // dependency task names
-    Commands []string         // shell commands (in order)
+    Name        string       // unique identifier
+    HeaderDeps  []Dep        // dependency task names (resolved before execution)
+    BodyLines   []BodyLine   // body lines in order (commands + inline deps)
+    ExitOnError bool         // [exit-on-error] annotation
 }
 
 type RunArgs struct {
@@ -175,7 +189,8 @@ type Line struct {
 **Architecture:**
 
 The parser is a hand-written single-pass state machine using dispatched methods on a
-`parser` struct. It maintains a `current *Task` pointer and an index `i` for scanning.
+`parser` struct. It maintains a `current *Task` pointer, an index `i` for scanning,
+and a `pendingAnnotations` slice for inter-line annotations.
 
 ```
 parse(lines):
@@ -185,6 +200,10 @@ parse(lines):
   for p.i over lines:
     if line is empty → continue
 
+    if line is "[annotation]" at indent 0:
+      → ANNOTATION
+      push to pendingAnnotations
+
     if line ends with ':' at indent 0:
       → BLOCK HEADER
       dispatchHeader(name)  // delegates to parseVars or parseTaskHeader
@@ -193,10 +212,11 @@ parse(lines):
       if current is nil → error: command outside task
       if line starts with '@':
         → INLINE DEPENDENCY
-        append strip('@') to current.Deps
+        strip '@', split parts → BodyLine{Type:"dep", Text:parts[0], Args:parts[1:]}
+        append to current.BodyLines
       else:
         → COMMAND
-        append raw line to current.Commands
+        append BodyLine{Type:"cmd", Text:raw_line} to current.BodyLines
 ```
 
 **Parsing methods:**
@@ -287,42 +307,69 @@ Resolve(f, name, seen, stack, out):
   if task missing → return error "Unknown dependency"
 
   add name to stack
-  for each dep in task.Deps:
-    Resolve(f, dep, seen, stack, out)
+  for each dep in task.HeaderDeps:
+    Resolve(f, dep.Name, seen, stack, out)
   remove name from stack
   mark name as seen
   append task to out
 ```
 
 **Edge cases:**
-- Tasks with no commands and no deps produce a warning (`fmt.Printf`), but don't halt.
+- Tasks with no BodyLines and no HeaderDeps produce a warning (`fmt.Printf`), but don't halt.
 - Missing dependency check happens **before** any field access on the task pointer,
   avoiding nil dereference.
-- Self-referencing tasks (`a: @ a` or `a: a`) are caught by the stack check.
+- Self-referencing tasks (`a: a:`) are caught by the stack check.
 
-**Bug fixed:** The resolver previously accessed task fields (`t.Commands`, `t.Deps`) before
+**Bug fixed:** The resolver previously accessed task fields (`t.BodyLines`, `t.HeaderDeps`) before
 checking if the task existed, which panicked on references to undefined task names. The
 existence check was moved before any field access.
 
+**Note:** `HeaderDeps` only includes deps from the task header line (`taskname: dep1 dep2:`).
+Inline deps (`@ dep`) inside the body are not resolved by the resolver — they are inlined
+at execution time by `collectCommands`.
+
 ---
 
-### `internal/engine/executor.go` (67 lines) — Command Executor
+### `internal/engine/executor.go` (143 lines) — Command Executor
 
-**Responsibility:** Run resolved tasks in order, handling interpolation, verbose mode, and dry-run.
+**Responsibility:** Collect all commands (including recursively inlined deps) into one script per task, execute via `/bin/sh -c`.
 
 ```
-Execute(tasks, vars, dry):
+Execute(file, order, vars, dry):
   for each task in resolved order:
-    for each command:
-      if command starts with '!':
-        strip '!' → shouldVerbose = true
-      cmd = interpolate(command, vars)
+    runTask(file, task, vars, dry, empty_stack)
 
-      if dry → print cmd, continue
+runTask(file, task, vars, dry, stack):
+  cmds = collectCommands(file, task, vars, stack)
+  if cmds empty → return
 
-      if shouldVerbose → print "> cmd"
-      run /bin/sh -c cmd with passthrough stdio
-      if error → return error immediately
+  if dry → print each cmd, return
+
+  script = set -e (if ExitOnError) + join cmds with newlines
+  run /bin/sh -c script with passthrough stdio
+  if error → return error immediately
+
+collectCommands(file, task, vars, stack):
+  if task.Name in stack → CYCLE DETECTED → return error
+  add task.Name to stack
+
+  cmds = []
+  for each BodyLine:
+    case "cmd":
+      strip '!' if present (verbose)
+      cmd = interpolate(text, vars)
+      if verbose → prepend echo '> cmd'
+      append cmd to cmds
+
+    case "dep":
+      apply line.Args to vars (per-call dep arguments)
+      dep = file.Tasks[line.Text]
+      sub = collectCommands(file, dep, vars, stack)
+      append sub to cmds
+      revert line.Args from vars
+
+  remove task.Name from stack
+  return cmds
 ```
 
 **Variable interpolation (`interpolate`):**
@@ -366,10 +413,16 @@ func interpolate(s string, vars map[string]string) string {
   like `{{--entry||ENTRY}}` (CLI override with file-var fallback).
 - **Unknown tokens preserved** — `{{MISSING}}` with no matching variable is left as-is in
   the output.
-- **`/bin/sh -c` invocation** — all commands run through the shell. Shell features (pipes,
-  redirects, variable expansion) work natively.
-- **Verbose mode (`!` prefix)** prints the interpolated command to stdout before running it.
-- **Dry-run** prints interpolated commands without executing them.
+- **Single `/bin/sh -c` per task** — all commands (including recursively inlined deps) are
+  collected into one shell script. Shell variables (`$MSG`) persist across `@ dep` boundaries.
+- **Verbose mode (`!` prefix)** — emits `echo '> <cmd>'` inline in the combined script before
+  the command itself, so verbose output appears correctly in the single-shell session.
+- **Dry-run** prints the flat list of collected commands in order, without execution.
+- **Inline dep recursion** — `collectCommands` walks `BodyLines`, and for each `"dep"` line
+  recursively collects the target task's commands. Per-call dep args are applied to vars during
+  collection and cleaned up afterward.
+- **Cycle detection** — a `stack` map tracks the current recursion chain in `collectCommands`,
+  catching cycles in inline dep references.
 - **No `--keep-going`** — first failing command stops execution entirely.
 - **Stdio passthrough** — commands inherit the terminal.
 
@@ -380,16 +433,18 @@ func interpolate(s string, vars map[string]string) string {
 ### Full Grammar
 
 ```
-file           = { meta_block | task_definition | empty_line | comment }
+file           = { meta_block | annotation | task_definition | empty_line | comment }
 meta_block     = "@vars:" newline { var_line newline }
 var_line       = indent identifier "=" value
+annotation     = "[" identifier "]"
 task_definition = header newline { body_line newline }
 header         = taskname [ ":" deps ] ":"
                | taskname deps ":"
 body_line      = indent command
-               | indent "@" dependency { dependency }
+               | indent "@" dependency { arg }
 deps           = dependency { dependency }
 dependency     = identifier
+arg            = identifier (args are passed as {{--key}} vars to the dep)
 command        = [ "!" ] text
 comment        = "#" text { text }
 empty_line     = ""
@@ -429,15 +484,26 @@ Built-ins (CWD, OS, ARCH)        ← lowest
   BIN = app
   PORT = 8080
 
+# session sharing — shell state persists across body lines
+main:
+    MSG="Starting build"
+    echo $MSG
+    @ build --target x86_64
+    @ deploy
+
+# dep arguments — {{--target}} injected into build's vars
 build:
-  @ lint
-  echo "Building {{BIN}} for {{OS}}-{{ARCH}}"
+    echo "building '{{BIN}}' for '{{--target}}'"
 
-build:dev:
-  !go build -o ./bin/{{BIN}} ./cmd/app
+deploy:
+    echo "deploying to {{CWD}} on {{OS}}-{{ARCH}}"
 
-lint:
-  go vet ./...
+# [exit-on-error] — shell exits on first non-zero command
+[exit-on-error]
+test:
+    echo "running tests..."
+    false
+    echo "this never runs"
 ```
 
 ---
@@ -450,7 +516,8 @@ lint:
 | Custom file format (not YAML/TOML) | Minimal, task-runner-specific syntax | Steep learning curve, no ecosystem tooling |
 | `/bin/sh -c` execution | Shell features work (pipes, redirects) | Shell injection, platform-specific |
 | Regex-based variable interpolation | Avoids substring corruption, enables fallback syntax | Regex compile cost (one-time) vs naive ReplaceAll |
-| 62 unit tests across 5 files | Safety net for refactoring | No integration or end-to-end tests |
+| 73 unit tests across 5 files | Safety net for refactoring | No integration or end-to-end tests |
+| Single `/bin/sh -c` per task with command inlining | Shell variable persistence across `@ dep` boundaries | Larger script per task, harder to debug individual failures |
 | Sequential execution (no `--keep-going`) | Simplicity | First failure aborts all remaining tasks |
 | `--file` flag for custom config paths | Flexibility without breaking default | No upward directory search |
 | 2-space indentation | Visual clarity | Tab = 1 indent (breaks convention) |
@@ -469,3 +536,10 @@ lint:
 3. **ParseArgs combined flag limitation**: Combined short flags (`-abc`) set all as boolean
    flags. There's no support for combined short flags with values (e.g., `-o value` must be
    separate tokens).
+
+4. **--dry with inline deps**: Dry-run prints the flat command list; there's no visual
+   distinction between commands from the parent task vs. commands from an inlined dep.
+
+5. **Dep args from multiple callers**: If two tasks call the same dep with different args,
+   the header-dep resolved order runs the dep once (without args). Each inline call site
+   inlines its own copy with per-call args. No last-wins ambiguity.

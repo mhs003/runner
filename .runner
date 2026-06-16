@@ -16,7 +16,7 @@ build:
 
 # $ ./build/run install
 install:
-  !cp {{BUILD_DIR}}/{{BIN}} ~/.config/hypr/bin/run
+  !cp {{BUILD_DIR}}/{{BIN}} ~/.local/bin
 
 # $ run run
 run:

@@ -27,7 +27,7 @@ executes commands through `/bin/sh -c`.
 | `./build/run --dry <task>` | Dry-run (print commands, no exec) |
 | `./build/run install` | Installs to `~/.config/hypr/bin/run` |
 
-There are **62 test cases** across 5 test files. There is no CI.
+There are **73 test cases** across 5 test files. There is no CI.
 
 ---
 
@@ -74,7 +74,7 @@ There are **62 test cases** across 5 test files. There is no CI.
 ```
 cmd/run/main.go            — CLI entry, flag parsing, orchestration
 internal/config/
-  ast.go                   — Type definitions: File, Task, RunArgs, ParseError
+  ast.go                   — Type definitions: File, Task, Dep, BodyLine, RunArgs, ParseError
   lexer.go                 — Text → []Line (indent tracking, comment stripping)
   lexer_test.go            — Lexer unit tests
   parser.go                — []Line → *File AST (dispatched parser methods)
@@ -85,7 +85,7 @@ internal/config/
 internal/engine/
   resolver.go              — Topological sort of task DAG with cycle detection
   resolver_test.go         — Resolver unit tests
-  executor.go              — Runs commands via /bin/sh -c, interpolates vars
+  executor.go              — Collects task commands recursively, executes combined script via /bin/sh -c
   executor_test.go         — Interpolate unit tests
 ```
 
@@ -106,7 +106,7 @@ CLI args ──→ ParseArgs ──→ vars map ──────────�
 3. **Parse** — build AST (`@vars`, tasks with deps/commands) from lines (`parser.go`)
 4. **Inject** — merge file vars, built-ins (`CWD`, `OS`, `ARCH`), and CLI args into `vars` map
 5. **Resolve** — topological sort of task DAG (DFS with cycle detection)
-6. **Execute** — run each command in order with variable interpolation
+6. **Execute** — collect all commands (including recursively inlined deps) into one script per task, run via `/bin/sh -c`
 
 ---
 
