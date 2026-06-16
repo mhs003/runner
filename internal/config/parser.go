@@ -6,9 +6,10 @@ import (
 )
 
 type parser struct {
-	f       *File
-	lines   []Line
-	current *Task
+	f                  *File
+	lines              []Line
+	current            *Task
+	pendingAnnotations []string
 }
 
 func Parse(lines []Line) (*File, error) {
@@ -39,6 +40,21 @@ func (p *parser) parse() error {
 			continue
 		}
 
+		if l.Indent == 0 && strings.HasPrefix(l.Text, "[") && strings.HasSuffix(l.Text, "]") {
+			rest := l.Text[1 : len(l.Text)-1]
+			switch rest {
+			case "exit-on-error":
+				p.pendingAnnotations = append(p.pendingAnnotations, "exit-on-error")
+			default:
+				return &ParseError{
+					Line: l.No,
+					Msg:  fmt.Sprintf("Unknown annotation '%s' at line %d", l.Text, l.No),
+				}
+			}
+			i++
+			continue
+		}
+
 		if l.Indent == 0 && p.current == nil {
 			return &ParseError{
 				Line: l.No,
@@ -54,13 +70,8 @@ func (p *parser) parse() error {
 				}
 			}
 			if strings.HasPrefix(l.Text, "@") {
-				rest := strings.TrimSpace(l.Text[1:])
-				if rest == "exit-on-error" {
-					p.current.ExitOnError = true
-				} else {
-					deps := strings.Fields(rest)
-					p.current.Deps = append(p.current.Deps, deps...)
-				}
+				deps := strings.Fields(strings.TrimSpace(l.Text[1:]))
+				p.current.Deps = append(p.current.Deps, deps...)
 			} else {
 				p.current.Commands = append(p.current.Commands, l.Text)
 			}
@@ -118,6 +129,12 @@ func (p *parser) parseTaskHeader(name string, i int) (int, error) {
 	}
 
 	p.current = &Task{Name: taskName, Deps: deps}
+	for _, a := range p.pendingAnnotations {
+		if a == "exit-on-error" {
+			p.current.ExitOnError = true
+		}
+	}
+	p.pendingAnnotations = nil
 	p.f.Tasks[taskName] = p.current
 	return i + 1, nil
 }

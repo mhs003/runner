@@ -193,6 +193,45 @@ func TestParseErrorCommandOutsideTask(t *testing.T) {
 	}
 }
 
+func TestParseExitOnErrorAnnotation(t *testing.T) {
+	f, err := Parse(lex("[exit-on-error]\nbuild:\n  false"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	task := f.Tasks["build"]
+	if !task.ExitOnError {
+		t.Fatal("task should have ExitOnError=true")
+	}
+}
+
+func TestParseExitOnErrorAnnotationScoped(t *testing.T) {
+	input := "[exit-on-error]\nbuild:\n  false\n\ntest:\n  true"
+	f, err := Parse(lex(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !f.Tasks["build"].ExitOnError {
+		t.Fatal("build task should have ExitOnError=true")
+	}
+	if f.Tasks["test"].ExitOnError {
+		t.Fatal("test task should NOT have ExitOnError=true")
+	}
+}
+
+func TestParseErrorUnknownAnnotation(t *testing.T) {
+	_, err := Parse(lex("[foobar]\nbuild:\n  echo hi"))
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	pe, ok := err.(*ParseError)
+	if !ok {
+		t.Fatalf("expected *ParseError, got %T", err)
+	}
+	if !strings.Contains(pe.Msg, "Unknown annotation") {
+		t.Fatalf("expected 'Unknown annotation' in error, got '%s'", pe.Msg)
+	}
+}
+
 func TestParseDuplicateTask(t *testing.T) {
 	_, err := Parse(lex("build:\n  echo first\nbuild:\n  echo second"))
 	if err == nil {
