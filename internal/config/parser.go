@@ -73,14 +73,14 @@ func (p *parser) parse() error {
 				rest := strings.TrimSpace(l.Text[1:])
 				if rest != "" {
 					parts := strings.Fields(rest)
-					d := Dep{Name: parts[0]}
+					bl := BodyLine{Type: "dep", Text: parts[0]}
 					if len(parts) > 1 {
-						d.Args = parts[1:]
+						bl.Args = parts[1:]
 					}
-					p.current.Deps = append(p.current.Deps, d)
+					p.current.BodyLines = append(p.current.BodyLines, bl)
 				}
 			} else {
-				p.current.Commands = append(p.current.Commands, l.Text)
+				p.current.BodyLines = append(p.current.BodyLines, BodyLine{Type: "cmd", Text: l.Text})
 			}
 			i++
 			continue
@@ -138,7 +138,7 @@ func (p *parser) parseTaskHeader(name string, i int) (int, error) {
 		}
 	}
 
-	p.current = &Task{Name: taskName, Deps: deps}
+	p.current = &Task{Name: taskName, HeaderDeps: deps}
 	for _, a := range p.pendingAnnotations {
 		if a == "exit-on-error" {
 			p.current.ExitOnError = true

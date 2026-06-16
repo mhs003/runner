@@ -11,7 +11,7 @@ main:
 
 # dep arguments — {{--target}} injected into build's vars
 build:
-    echo "building '{{BIN}}' for '{{--target}}'"
+    echo "building '{{BIN}}' for '{{--target}}' $MSG"
 
 deploy:
     echo "deploying to {{CWD}} on {{OS}}-{{ARCH}}"

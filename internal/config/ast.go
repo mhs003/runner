@@ -10,10 +10,16 @@ type Dep struct {
 	Args []string
 }
 
+type BodyLine struct {
+	Type string // "cmd" or "dep"
+	Text string // command text (with ! prefix) or dep name
+	Args []string // dep arguments (only for "dep" type)
+}
+
 type Task struct {
 	Name        string
-	Deps        []Dep
-	Commands    []string
+	HeaderDeps  []Dep
+	BodyLines   []BodyLine
 	ExitOnError bool
 }
 

@@ -23,11 +23,15 @@ func task(name string, depNames ...string) config.Task {
 	for i, dn := range depNames {
 		deps[i] = config.Dep{Name: dn}
 	}
-	return config.Task{Name: name, Deps: deps}
+	return config.Task{Name: name, HeaderDeps: deps}
 }
 
 func taskWithCmd(name string, cmds ...string) config.Task {
-	return config.Task{Name: name, Commands: cmds}
+	bls := make([]config.BodyLine, len(cmds))
+	for i, c := range cmds {
+		bls[i] = config.BodyLine{Type: "cmd", Text: c}
+	}
+	return config.Task{Name: name, BodyLines: bls}
 }
 
 func resolve(f *config.File, name string) ([]*config.Task, error) {

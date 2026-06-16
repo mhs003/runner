@@ -75,9 +75,9 @@ func main() {
 
 			fmt.Printf("Task: %s\n", task.Name)
 
-			if len(task.Deps) > 0 {
-				depNames := make([]string, len(task.Deps))
-				for i, d := range task.Deps {
+			if len(task.HeaderDeps) > 0 {
+				depNames := make([]string, len(task.HeaderDeps))
+				for i, d := range task.HeaderDeps {
 					depNames[i] = d.Name
 				}
 				fmt.Printf("  Dependencies: %s\n", strings.Join(depNames, ", "))
@@ -85,13 +85,22 @@ func main() {
 				fmt.Println("  Dependencies: none")
 			}
 
-			if len(task.Commands) > 0 {
-				fmt.Println("  Commands:")
-				for i, cmd := range task.Commands {
-					fmt.Printf("    %d. %s\n", i+1, cmd)
+			if len(task.BodyLines) > 0 {
+				fmt.Println("  Body:")
+				for _, line := range task.BodyLines {
+					switch line.Type {
+					case "cmd":
+						fmt.Printf("  - %s\n", line.Text)
+					case "dep":
+						disp := "@ " + line.Text
+						for _, a := range line.Args {
+							disp += " " + a
+						}
+						fmt.Printf("  - %s\n", disp)
+					}
 				}
 			} else {
-				fmt.Println("  Commands: none")
+				fmt.Println("  Body: none")
 			}
 
 			if i < len(taskNames)-1 {
@@ -143,7 +152,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := engine.Execute(order, vars, *dry); err != nil {
+	if err := engine.Execute(file, order, vars, *dry); err != nil {
 		os.Exit(1)
 	}
 }

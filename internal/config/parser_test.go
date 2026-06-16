@@ -64,6 +64,22 @@ func TestParseVarsWithQuotes(t *testing.T) {
 	}
 }
 
+func cmdLine(text string) BodyLine {
+	return BodyLine{Type: "cmd", Text: text}
+}
+
+func depLine(name string, args ...string) BodyLine {
+	return BodyLine{Type: "dep", Text: name, Args: args}
+}
+
+func hdeps(depNames ...string) []Dep {
+	d := make([]Dep, len(depNames))
+	for i, n := range depNames {
+		d[i] = Dep{Name: n}
+	}
+	return d
+}
+
 func TestParseSingleTask(t *testing.T) {
 	f, err := Parse(lex("build:\n  echo hello"))
 	if err != nil {
@@ -76,23 +92,16 @@ func TestParseSingleTask(t *testing.T) {
 	if task.Name != "build" {
 		t.Fatalf("expected task name 'build', got '%s'", task.Name)
 	}
-	if len(task.Commands) != 1 {
-		t.Fatalf("expected 1 command, got %d", len(task.Commands))
+	if len(task.BodyLines) != 1 {
+		t.Fatalf("expected 1 body line, got %d", len(task.BodyLines))
 	}
-	if task.Commands[0] != "echo hello" {
-		t.Fatalf("expected command 'echo hello', got '%s'", task.Commands[0])
+	expected := []BodyLine{{Type: "cmd", Text: "echo hello"}}
+	if !reflect.DeepEqual(task.BodyLines, expected) {
+		t.Fatalf("expected %+v, got %+v", expected, task.BodyLines)
 	}
-	if len(task.Deps) != 0 {
-		t.Fatalf("expected 0 deps, got %d", len(task.Deps))
+	if len(task.HeaderDeps) != 0 {
+		t.Fatalf("expected 0 header deps, got %d", len(task.HeaderDeps))
 	}
-}
-
-func deps(depNames ...string) []Dep {
-	d := make([]Dep, len(depNames))
-	for i, n := range depNames {
-		d[i] = Dep{Name: n}
-	}
-	return d
 }
 
 func TestParseTaskWithDeps(t *testing.T) {
@@ -104,9 +113,9 @@ func TestParseTaskWithDeps(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected task 'build' to exist, got tasks: %v", f.Tasks)
 	}
-	expected := deps("dep1", "dep2")
-	if !reflect.DeepEqual(task.Deps, expected) {
-		t.Fatalf("expected deps %v, got %v", expected, task.Deps)
+	expected := hdeps("dep1", "dep2")
+	if !reflect.DeepEqual(task.HeaderDeps, expected) {
+		t.Fatalf("expected header deps %v, got %v", expected, task.HeaderDeps)
 	}
 }
 
@@ -116,9 +125,9 @@ func TestParseInlineDeps(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	task := f.Tasks["build"]
-	expected := deps("dep1", "dep2")
-	if !reflect.DeepEqual(task.Deps, expected) {
-		t.Fatalf("expected deps %v, got %v", expected, task.Deps)
+	expected := []BodyLine{depLine("dep1"), depLine("dep2")}
+	if !reflect.DeepEqual(task.BodyLines, expected) {
+		t.Fatalf("expected body lines %v, got %v", expected, task.BodyLines)
 	}
 }
 
@@ -127,9 +136,9 @@ func TestParseDepWithArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := []Dep{{Name: "build", Args: []string{"--target", "x86_64"}}}
-	if !reflect.DeepEqual(f.Tasks["main"].Deps, expected) {
-		t.Fatalf("expected deps %v, got %v", expected, f.Tasks["main"].Deps)
+	expected := []BodyLine{depLine("build", "--target", "x86_64")}
+	if !reflect.DeepEqual(f.Tasks["main"].BodyLines, expected) {
+		t.Fatalf("expected body lines %v, got %v", expected, f.Tasks["main"].BodyLines)
 	}
 }
 
@@ -138,9 +147,9 @@ func TestParseDepWithFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := []Dep{{Name: "test", Args: []string{"--all", "--verbose"}}}
-	if !reflect.DeepEqual(f.Tasks["main"].Deps, expected) {
-		t.Fatalf("expected deps %v, got %v", expected, f.Tasks["main"].Deps)
+	expected := []BodyLine{depLine("test", "--all", "--verbose")}
+	if !reflect.DeepEqual(f.Tasks["main"].BodyLines, expected) {
+		t.Fatalf("expected body lines %v, got %v", expected, f.Tasks["main"].BodyLines)
 	}
 }
 
@@ -149,9 +158,9 @@ func TestParseDepWithNoArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expected := []Dep{{Name: "build"}, {Name: "test"}}
-	if !reflect.DeepEqual(f.Tasks["main"].Deps, expected) {
-		t.Fatalf("expected deps %v, got %v", expected, f.Tasks["main"].Deps)
+	expected := []BodyLine{depLine("build"), depLine("test")}
+	if !reflect.DeepEqual(f.Tasks["main"].BodyLines, expected) {
+		t.Fatalf("expected body lines %v, got %v", expected, f.Tasks["main"].BodyLines)
 	}
 }
 
@@ -160,8 +169,8 @@ func TestParseDepWithLeadingSpaceOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(f.Tasks["main"].Deps) != 0 {
-		t.Fatalf("expected 0 deps, got %d", len(f.Tasks["main"].Deps))
+	if len(f.Tasks["main"].BodyLines) != 0 {
+		t.Fatalf("expected 0 body lines, got %d", len(f.Tasks["main"].BodyLines))
 	}
 }
 
@@ -171,9 +180,9 @@ func TestParseMultipleCommands(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	task := f.Tasks["build"]
-	expected := []string{"echo first", "echo second"}
-	if !reflect.DeepEqual(task.Commands, expected) {
-		t.Fatalf("expected commands %v, got %v", expected, task.Commands)
+	expected := []BodyLine{cmdLine("echo first"), cmdLine("echo second")}
+	if !reflect.DeepEqual(task.BodyLines, expected) {
+		t.Fatalf("expected body lines %v, got %v", expected, task.BodyLines)
 	}
 }
 
@@ -215,8 +224,8 @@ func TestParseVerboseCommand(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	task := f.Tasks["build"]
-	if task.Commands[0] != "!echo hello" {
-		t.Fatalf("expected command '!echo hello', got '%s'", task.Commands[0])
+	if len(task.BodyLines) != 1 || task.BodyLines[0].Type != "cmd" || task.BodyLines[0].Text != "!echo hello" {
+		t.Fatalf("expected body line cmd '!echo hello', got %+v", task.BodyLines)
 	}
 }
 

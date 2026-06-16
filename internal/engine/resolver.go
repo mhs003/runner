@@ -19,13 +19,13 @@ func Resolve(f *config.File, name string, seen map[string]bool, stack map[string
 		return fmt.Errorf("Unknown dependency task '%s'", name)
 	}
 
-	if t.Commands == nil && t.Deps == nil {
+	if t.BodyLines == nil && t.HeaderDeps == nil {
 		fmt.Printf("Warning: task '%s' has no command\n", name)
 	}
 
 	stack[name] = true
 
-	for _, d := range t.Deps {
+	for _, d := range t.HeaderDeps {
 		if err := Resolve(f, d.Name, seen, stack, out); err != nil {
 			return err
 		}
