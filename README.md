@@ -123,6 +123,19 @@ Copies the binary to `~/.local/bin/run`.
 
 ---
 
+## VS Code Extension
+
+A companion extension (`vscode-runner/`) provides syntax highlighting and CodeLens
+**Run** / **Dry Run** buttons for `.runner` files. Open the `vscode-runner/` folder
+in VS Code and press `F5` to try it, or package it with `vsce`:
+
+```bash
+cd vscode-runner
+npm install
+npm run build
+```
+
+---
 
 ## License
 

@@ -1,0 +1,65 @@
+{
+  "name": "runner-task-runner",
+  "displayName": "Runner Task Runner",
+  "description": "Syntax highlighting and CodeLens run buttons for .runner files",
+  "version": "0.1.0",
+  "repository": "https://github.com/mhs003/runner",
+  "publisher": "mhs003",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:runner"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "runner",
+        "aliases": [
+          "Runner",
+          "runner"
+        ],
+        "extensions": [
+          ".runner",
+          ".runner.global"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "runner",
+        "scopeName": "source.runner",
+        "path": "./syntaxes/runner.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "runner.runTask",
+        "title": "Runner: Run Task"
+      },
+      {
+        "command": "runner.dryRunTask",
+        "title": "Runner: Dry Run Task"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "prepublish": "npm run build",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "vsce": "^2.15.0"
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Runner",
+  "scopeName": "source.runner",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#annotations" },
+    { "include": "#varsBlock" },
+    { "include": "#taskDefinition" },
+    { "include": "#variableInterpolation" }
+  ],
+  "repository": {
+    "comments": {
+      "name": "comment.line.number-sign",
+      "match": "^#.*$"
+    },
+    "annotations": {
+      "name": "keyword.other",
+      "match": "^\\[[a-z-]+\\]$"
+    },
+    "varsBlock": {
+      "name": "meta.block.vars",
+      "begin": "^@vars:$",
+      "beginCaptures": {
+        "0": { "name": "keyword.control" }
+      },
+      "end": "^(?=\\S)",
+      "patterns": [
+        { "include": "#varLine" },
+        { "include": "#variableInterpolation" }
+      ]
+    },
+    "varLine": {
+      "match": "^(\\s+)([\\w.-]+)\\s*=\\s*(.*)$",
+      "captures": {
+        "2": { "name": "variable.other.readwrite" },
+        "3": { "name": "string.unquoted" }
+      }
+    },
+    "taskDefinition": {
+      "name": "meta.block.task",
+      "begin": "^([a-zA-Z_][\\w.:-]*)\\s*:",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function" }
+      },
+      "end": "^(?=\\S)",
+      "patterns": [
+        { "include": "#headerDep" },
+        { "include": "#inlineDep" },
+        { "include": "#commandLine" },
+        { "include": "#variableInterpolation" }
+      ]
+    },
+    "headerDep": {
+      "match": "(?<=:)\\s+([\\w.:-]+):?",
+      "captures": {
+        "1": { "name": "entity.other.attribute-name" }
+      }
+    },
+    "inlineDep": {
+      "match": "^(\\s+)(@)\\s*([\\w.:-]+)((?:\\s+[^\\s]+)*)$",
+      "captures": {
+        "2": { "name": "keyword.operator" },
+        "3": { "name": "entity.other.attribute-name" },
+        "4": { "name": "variable.parameter" }
+      }
+    },
+    "commandLine": {
+      "match": "^(\\s+)(!)?(.*)$",
+      "captures": {
+        "2": { "name": "keyword.operator" },
+        "3": { "name": "string.unquoted" }
+      }
+    },
+    "variableInterpolation": {
+      "match": "\\{\\{\\s*([\\w.:-]+)(?:\\|\\|([^}]*))?\\s*\\}\\}",
+      "captures": {
+        "1": { "name": "variable.other.readwrite" },
+        "2": { "name": "constant.other" }
+      }
+    }
+  }
+}
