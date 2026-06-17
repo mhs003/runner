@@ -82,6 +82,8 @@ internal/config/
   args.go                  — ParseArgs CLI argument parser
   args_test.go             — ParseArgs unit tests
   loader.go                — Reads .runner from given path
+internal/display/
+  list.go                  — --list output formatting (pretty text + JSON)
 internal/engine/
   resolver.go              — Topological sort of task DAG with cycle detection
   resolver_test.go         — Resolver unit tests
@@ -153,3 +155,5 @@ The parser currently supports `@vars` as the only meta block. To add a new meta 
 - **Adding execution features?** Modify `executor.go` — that's the sole execution engine.
 - **Adding tests?** Put them in the same package with `_test.go` suffix. Use table-driven tests.
 - **ParseArgs lives in `args.go`** — it's a standalone function with its own test file `args_test.go`.
+- **Display formatting lives in `internal/display/list.go`** — add new `--list` output modes there, not in `main.go`. The `PrintTasks` function receives a `*config.File` and a `jsonOutput bool`. Add new flags for custom formatting in `main.go` and pass them through.
+- **Adding `--list` sub-features** — the display package imports only `encoding/json`, `fmt`, `sort`, and `strings` (all stdlib). No imports from `engine` or `config` beyond the types in `ast.go`.

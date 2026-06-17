@@ -6,7 +6,7 @@
 custom DSL inspired by `just`/`Make`), parses it with a hand-written lexer and parser, resolves
 inter-task dependencies via topological sort, and executes shell commands through `/bin/sh -c`.
 
-The entire project is ~640 lines of Go, spread across 8 source files in 3 packages (plus 5 test files).
+The entire project is ~760 lines of Go, spread across 9 source files in 4 packages (plus 5 test files).
 There are no external dependencies and no CI.
 
 ---
@@ -18,34 +18,31 @@ There are no external dependencies and no CI.
 │  .runner     │ ──→ │  Load   │ ──→ │  Lex    │ ──→ │     Parse        │
 │  (text file) │     │loader.go│     │lexer.go │     │   parser.go      │
 └──────────────┘     └──────────┘     └──────────┘     └────────┬─────────┘
-                                                                 │
-                                     ┌──────────────┐            │
-                                     │   CLI args   │            ▼
-                                     │  (--list,    │     ┌──────────────┐
-                                     │   --dry,     │     │   *File AST  │
-                                     │   <task>,    │     │  (vars,      │
-                                     │   --k v, ...)│     │   tasks)     │
-                                     └──────┬───────┘     └──────┬───────┘
-                                            │                    │
-                                            ▼                    ▼
-                                     ┌──────────────────────────────┐
-                                     │     Variable Injection       │
-                                     │  file vars ← built-ins ← CLI │
-                                     └──────────────┬───────────────┘
-                                                    │
-                                                    ▼
-                                     ┌──────────────────────────────┐
-                                     │  Resolve (Topological Sort)  │
-                                     │   DFS + cycle detection     │
-                                     └──────────────┬───────────────┘
-                                                    │
-                                                    ▼
-                                      ┌──────────────────────────────┐
-                                      │        Execute               │
-                                      │  collectCommands → combine   │
-                                      │  single /bin/sh -c per task  │
-                                      │  interpolation + verbose     │
-                                      └──────────────────────────────┘
+                                                                  │
+                                      ┌──────────────┐            │
+                                      │   CLI args   │            ▼
+                                      │  (--list,    │     ┌──────────────────┐
+                                      │   --dry,     │     │   *File AST      │
+                                      │   <task>,    │     │  (vars, tasks)   │
+                                      │   --k v, ...)│     └──┬───────┬───────┘
+                                      └──────┬───────┘        │       │
+                                             │            ┌───┘       └───┐
+                                             ▼            ▼               ▼
+                                      ┌──────────┐  ┌─────────────┐ ┌──────────┐
+                                      │  --list  │  │  Variable   │ │ --list   │
+                                      │  (text)  │  │  Injection  │ │  (JSON)  │
+                                      │    ↓     │  └──────┬──────┘ │    ↓     │
+                                      │ display  │         │        │ display  │
+                                      │.PrintTasks│        ▼        │.PrintTasks│
+                                      └──────────┘  ┌──────────┐  └──────────┘
+                                                     │ Resolve  │
+                                                     └────┬─────┘
+                                                          │
+                                                          ▼
+                                                   ┌──────────────┐
+                                                   │   Execute    │
+                                                   │ /bin/sh -c   │
+                                                   └──────────────┘
 ```
 
 ### Stage Details
@@ -55,26 +52,27 @@ There are no external dependencies and no CI.
 | 1. Load | `loader.go` | file system | `[]byte` | Reads config file from given path. |
 | 2. Lex | `lexer.go` | raw text | `[]Line` | Splits by newlines, counts leading spaces as indent, strips comments. |
 | 3. Parse | `parser.go` | `[]Line` | `*File` | Builds AST: detects `@vars` meta block, task headers (with `HeaderDeps`), body lines (typed `cmd` or `dep` with args), `[exit-on-error]` annotations. |
-| 4. Inject | `main.go` | `*File` + CLI | `map[string]string` | Merges file vars, built-ins (`CWD`, `OS`, `ARCH`), CLI positional/named/flag args. |
-| 5. Resolve | `resolver.go` | `*File` + task name | `[]*Task` (ordered) | DFS topological sort on `HeaderDeps` only with cycle detection via `stack` map. |
-| 6. Execute | `executor.go` | ordered tasks + vars | exit code | `collectCommands` recursively gathers commands from body lines (inlining `@ dep` calls), builds one combined script per task, runs via `/bin/sh -c`. |
+| 4. Display | `list.go` | `*File` + `--json` flag | stdout (text/JSON) | Formats and prints all tasks, deps, and vars. Used by `--list`. Branches off after Parse; the main flow continues to Inject. |
+| 5. Inject | `main.go` | `*File` + CLI | `map[string]string` | Merges file vars, built-ins (`CWD`, `OS`, `ARCH`), CLI positional/named/flag args. |
+| 6. Resolve | `resolver.go` | `*File` + task name | `[]*Task` (ordered) | DFS topological sort on `HeaderDeps` only with cycle detection via `stack` map. |
+| 7. Execute | `executor.go` | ordered tasks + vars | exit code | `collectCommands` recursively gathers commands from body lines (inlining `@ dep` calls), builds one combined script per task, runs via `/bin/sh -c`. |
 
 ---
 
 ## Package Map
 
-### `cmd/run/main.go` (158 lines) — Entry Point
+### `cmd/run/main.go` (114 lines) — Entry Point
 
 **Responsibility:** CLI orchestration.
 
 ```
 main()
-  ├── flag.Parse()              // --list, --dry, --file, --init
+  ├── flag.Parse()              // --list, --dry, --file, --init, --json
   ├── [--init: scaffold .runner, exit]
   ├── config.Load(path)         // read .runner (or ~/.runner.global fallback)
   ├── config.Lex()              // tokenize
   ├── config.Parse()            // build AST
-  ├── [--list: print tasks with BodyLines, exit]
+  ├── [--list: display.PrintTasks(file, *showJSON), exit]
   ├── [validate task exists]
   ├── build vars map
   │   ├── maps.Copy(file.Vars)            // from .runner @vars
@@ -267,6 +265,24 @@ func ParseArgs(args []string) RunArgs
   (boolean), not as a named arg. This is intentional but restrictive.
 - Named keys preserve the `--` or `-` prefix, so accessing them in `.runner` requires
   `{{--entry}}` not `{{entry}}`.
+
+---
+
+### `internal/display/list.go` (138 lines) — Task List Formatter
+
+**Responsibility:** Format and print the `--list` output (plain text or JSON).
+
+```go
+func PrintTasks(f *config.File, jsonOutput bool)
+```
+
+Called from `main.go` when `--list` is passed. Two output modes:
+
+- **Pretty text** — aligned columns listing tasks, their body lines, dependencies, and vars.
+- **JSON** — structured output consumable by external tools (VS Code extension, scripts).
+
+The package sorts tasks alphabetically, computes column alignment padding, and
+prints directly to stdout. No return value — the caller handles `os.Exit(0)`.
 
 ---
 

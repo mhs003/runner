@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"maps"
 	"mhs003/runner/internal/config"
+	"mhs003/runner/internal/display"
 	"mhs003/runner/internal/engine"
 	"os"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 )
 
 func main() {
 	showList := flag.Bool("list", false, "Show list of all tasks")
+	showJSON := flag.Bool("json", false, "Output in JSON format (use with --list)")
 	dry := flag.Bool("dry", false, "dry run")
 	filePath := flag.String("file", ".runner", "Path to runner config file")
 	doInit := flag.Bool("init", false, "Initialize a .runner file in current directory")
@@ -62,52 +63,7 @@ func main() {
 	}
 
 	if *showList {
-		fmt.Println("Available tasks:")
-
-		taskNames := make([]string, 0, len(file.Tasks))
-		for name := range file.Tasks {
-			taskNames = append(taskNames, name)
-		}
-		sort.Strings(taskNames)
-
-		for i, name := range taskNames {
-			task := file.Tasks[name]
-
-			fmt.Printf("Task: %s\n", task.Name)
-
-			if len(task.HeaderDeps) > 0 {
-				depNames := make([]string, len(task.HeaderDeps))
-				for i, d := range task.HeaderDeps {
-					depNames[i] = d.Name
-				}
-				fmt.Printf("  Dependencies: %s\n", strings.Join(depNames, ", "))
-			} else {
-				fmt.Println("  Dependencies: none")
-			}
-
-			if len(task.BodyLines) > 0 {
-				fmt.Println("  Body:")
-				for _, line := range task.BodyLines {
-					switch line.Type {
-					case "cmd":
-						fmt.Printf("  - %s\n", line.Text)
-					case "dep":
-						disp := "@ " + line.Text
-						for _, a := range line.Args {
-							disp += " " + a
-						}
-						fmt.Printf("  - %s\n", disp)
-					}
-				}
-			} else {
-				fmt.Println("  Body: none")
-			}
-
-			if i < len(taskNames)-1 {
-				fmt.Println("---")
-			}
-		}
-		fmt.Println()
+		display.PrintTasks(file, *showJSON)
 		os.Exit(0)
 	}
 
