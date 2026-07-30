@@ -11,18 +11,19 @@ import (
 )
 
 var tokenRe = regexp.MustCompile(`\{\{(.+?)\}\}`)
+var atRe = regexp.MustCompile(`^(\d*)(@)(\d*)$`)
 
-func Execute(f *config.File, order []*config.Task, vars map[string]string, dry bool) error {
+func Execute(f *config.File, order []*config.Task, vars map[string]string, positional []string, dry bool) error {
 	for _, t := range order {
-		if err := runTask(f, t, vars, dry, map[string]bool{}); err != nil {
+		if err := runTask(f, t, vars, positional, dry, map[string]bool{}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runTask(f *config.File, t *config.Task, vars map[string]string, dry bool, stack map[string]bool) error {
-	cmds, err := collectCommands(f, t, vars, stack)
+func runTask(f *config.File, t *config.Task, vars map[string]string, positional []string, dry bool, stack map[string]bool) error {
+	cmds, err := collectCommands(f, t, vars, positional, stack)
 	if err != nil {
 		return err
 	}
@@ -53,7 +54,7 @@ func runTask(f *config.File, t *config.Task, vars map[string]string, dry bool, s
 	return ec.Run()
 }
 
-func collectCommands(f *config.File, t *config.Task, vars map[string]string, stack map[string]bool) ([]string, error) {
+func collectCommands(f *config.File, t *config.Task, vars map[string]string, positional []string, stack map[string]bool) ([]string, error) {
 	if stack[t.Name] {
 		return nil, fmt.Errorf("circular dependency detected at '%s'", t.Name)
 	}
@@ -70,7 +71,7 @@ func collectCommands(f *config.File, t *config.Task, vars map[string]string, sta
 				shouldVerbose = true
 				c = c[1:]
 			}
-			cmd := interpolate(c, vars)
+			cmd := interpolate(c, vars, positional)
 			if shouldVerbose {
 				escaped := strings.ReplaceAll(cmd, "'", "'\\''")
 				cmds = append(cmds, "echo '> "+escaped+"'")
@@ -100,7 +101,7 @@ func collectCommands(f *config.File, t *config.Task, vars map[string]string, sta
 				return nil, fmt.Errorf("unknown dependency task '%s'", line.Text)
 			}
 
-			sub, err := collectCommands(f, dep, vars, stack)
+			sub, err := collectCommands(f, dep, vars, positional, stack)
 			if err != nil {
 				return nil, err
 			}
@@ -115,7 +116,7 @@ func collectCommands(f *config.File, t *config.Task, vars map[string]string, sta
 	return cmds, nil
 }
 
-func interpolate(s string, vars map[string]string) string {
+func interpolate(s string, vars map[string]string, positional []string) string {
 	return tokenRe.ReplaceAllStringFunc(s, func(match string) string {
 		inner := match[2 : len(match)-2]
 
@@ -127,8 +128,16 @@ func interpolate(s string, vars map[string]string) string {
 			primary = inner
 		}
 
-		if v, ok := vars[primary]; ok && v != "" {
-			return v
+		if v, ok := resolveAt(primary, vars, positional); ok {
+			if v != "" {
+				return v
+			}
+			if fallback != "" {
+				if v2, ok := vars[fallback]; ok {
+					return v2
+				}
+				return fallback
+			}
 		}
 
 		if fallback != "" {
@@ -140,4 +149,71 @@ func interpolate(s string, vars map[string]string) string {
 
 		return match
 	})
+}
+
+func resolveAt(primary string, vars map[string]string, positional []string) (string, bool) {
+	if primary == "@" {
+		if len(positional) == 0 {
+			return "", true
+		}
+		return strings.Join(positional, " "), true
+	}
+
+	m := atRe.FindStringSubmatch(primary)
+	if m == nil {
+		v, ok := vars[primary]
+		return v, ok
+	}
+
+	prefix := m[1]
+	suffix := m[3]
+
+	if prefix == "" && suffix == "" {
+		if len(positional) == 0 {
+			return "", true
+		}
+		return strings.Join(positional, " "), true
+	}
+
+	if prefix == "" && suffix != "" {
+		n, err := strconv.Atoi(suffix)
+		if err != nil || n <= 0 {
+			return "", true
+		}
+		if n > len(positional) {
+			n = len(positional)
+		}
+		return strings.Join(positional[:n], " "), true
+	}
+
+	if prefix != "" && suffix == "" {
+		n, err := strconv.Atoi(prefix)
+		if err != nil || n <= 0 {
+			return "", true
+		}
+		if n > len(positional) {
+			return strings.Join(positional, " "), true
+		}
+		return strings.Join(positional[len(positional)-n:], " "), true
+	}
+
+	mv, err := strconv.Atoi(prefix)
+	if err != nil || mv < 1 {
+		mv = 1
+	}
+	nv, err := strconv.Atoi(suffix)
+	if err != nil || nv < 1 {
+		return "", true
+	}
+	mv--
+	if mv >= nv {
+		return "", true
+	}
+	if mv > len(positional) {
+		return "", true
+	}
+	if nv > len(positional) {
+		nv = len(positional)
+	}
+	return strings.Join(positional[mv:nv], " "), true
 }
