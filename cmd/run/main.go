@@ -62,6 +62,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := config.ResolveVars(file.Vars); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
 	if *showList {
 		display.PrintTasks(file, *showJSON)
 		os.Exit(0)
@@ -109,6 +114,7 @@ func main() {
 	}
 
 	if err := engine.Execute(file, order, vars, ra.Positional, *dry); err != nil {
+		fmt.Println(err)
 		os.Exit(1)
 	}
 }

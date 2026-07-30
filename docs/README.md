@@ -14,7 +14,7 @@ $ ./build/run [flags] <task> [--key val] [-f] [args...]
 go build -o build/run ./cmd/run      # build binary
 make                                  # build (make)
 ./build/run install                   # install to ~/.local/bin
-go test ./...                         # run all tests (90 tests, 5 files)
+go test ./...                         # run all tests (106 tests, 6 files)
 go vet ./...                          # static analysis
 ```
 
@@ -91,6 +91,20 @@ taskname: dep1 dep2:  # ← task with header dependencies (dep1, dep2 run first)
 ```
 
 - `KEY = value` — split on first `=`, both sides trimmed
+- **`{{VAR}}` references** — values can reference other `@vars`:
+  ```yaml
+  @vars:
+    NAME = world
+    GREET = hello {{NAME}}
+  ```
+  `{{GREET}}` → `hello world`. Cross-references work in any order. Cycles detected.
+- **`$(cmd)` shell substitution** — values containing `$(...)` are executed via `/bin/sh -c` lazily (on first use) and cached:
+  ```yaml
+  @vars:
+    HOST = $(hostname)
+    DESC = {{HOST}} is live
+  ```
+  `{{HOST}}` executes `hostname` once, caches the result. `{{DESC}}` → `coder71 is live`. `$VAR` env vars from `@vars` are available inside `$(cmd)`.
 - **Quotes stored literally:** `BIN = "app"` → `{{BIN}}` yields `"app"` (with quotes)
 - Empty lines and comments (`#`) allowed within the block
 
@@ -185,6 +199,7 @@ All `{{TOKEN}}` patterns are resolved at execution time. Tokens can appear anywh
 | Source | Syntax | Example |
 |--------|--------|---------|
 | `@vars` block | `{{KEY}}` | `{{BIN}}` |
+| `@vars` shell cmd | `$(cmd)` in var value | `{{HOST}}` where `HOST=$(hostname)` → `coder71` |
 | Built-in | `{{CWD}}`, `{{OS}}`, `{{ARCH}}` | `{{OS}}-{{ARCH}}` |
 | All positional CLI args | `{{ARGS}}` | `{{ARGS}}` → `Hello World` |
 | Individual positional | `{{1}}`, `{{2}}`, `{{3}}`... | `{{1}}` → first arg |
@@ -260,8 +275,13 @@ Each subsequent layer overwrites the previous. CLI flags always win.
 ## Execution Model
 
 ```
-Parse → Inject vars → Resolve (topological sort) → Execute (/bin/sh -c)
+Parse → ResolveVars → Inject vars → Resolve (topological sort) → Execute (/bin/sh -c)
 ```
+
+- **ResolveVars** — resolves `{{VAR}}` cross-references within `@vars` block (pre-process)
+- **Inject** — merges file vars, built-ins, and CLI args
+- **Resolve** — topological sort of header dependencies
+- **Execute** — collects commands (recursively inlining deps with lazy `$(cmd)` resolution + caching), runs via `/bin/sh -c`
 
 ### Resolution
 
@@ -280,14 +300,15 @@ Parse → Inject vars → Resolve (topological sort) → Execute (/bin/sh -c)
     echo $MSG           # → Hello
     @ print_msg         # $MSG still available
   ```
+- **Lazy `$(cmd)` execution** — `$(cmd)` in `@vars` values runs only when the variable is first used. Result is cached in `shellCache` shared across all tasks and inline deps.
 - **`[exit-on-error]`** prepends `set -e` to the script — first non-zero exit stops everything
-- **No `--keep-going`** — first failing command in any task stops all subsequent tasks
+- **No `--keep-going`** — first failing command (or `$(cmd)`) in any task stops all subsequent tasks
 - **Stdio passthrough** — commands inherit stdin/stdout/stderr from the terminal
 - **Verbose mode (`!`)** — prepends `echo '> <command>'` in the script, works with dry-run
 
 ### `--dry` Run
 
-Prints the flat collected command list for each task without executing:
+Prints the flat collected command list for each task without executing. **Note:** `$(cmd)` values are still executed during interpolation (they're needed to produce the display output).
 
 ```bash
 $ ./build/run --dry build
@@ -308,7 +329,7 @@ No visual distinction between commands from the parent task vs commands from inl
 | **`#` in body = literal** | Only top-level `#` comments are stripped. Inside a task body, `#` is passed to the shell. |
 | **`@` with nothing after** | `@` on a body line with no following text → silently skipped |
 | **Fallback resolved as var** | `{{X\|\|Y}}` — if `Y` is a valid variable, its value is used. Use `{{X\|\| literal}}` for literals. |
-| **`--dry` prints flat** | No visual separation between parent and dep commands |
+| **`--dry` prints flat** | No visual separation between parent and dep commands. Also: `$(cmd)` in vars still runs during dry-run (needed for interpolation). |
 | **No `--help`** | Go's `flag` package auto-generates basic help via `-h` |
 | **`{{@}}` in deps** | `{{@}}` inside an inline dep's body resolves to **top-level CLI** positional args, not dep-call-site args |
 | **Empty `@` stays** | `{{@}}` with no args stays as `{{@}}`. Use `{{@\|\|}}` for empty string. |

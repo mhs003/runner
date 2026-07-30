@@ -6,7 +6,7 @@
 custom DSL inspired by `just`/`Make`), parses it with a hand-written lexer and parser, resolves
 inter-task dependencies via topological sort, and executes shell commands through `/bin/sh -c`.
 
-The entire project is ~814 lines of Go, spread across 9 source files in 4 packages (plus 5 test files with 90 test cases).
+The entire project is ~1007 lines of Go, spread across 10 source files in 4 packages (plus 6 test files with 106 test cases).
 There are no external dependencies and no CI.
 
 ---
@@ -52,16 +52,17 @@ There are no external dependencies and no CI.
 | 1. Load | `loader.go` | file system | `[]byte` | Reads config file from given path. |
 | 2. Lex | `lexer.go` | raw text | `[]Line` | Splits by newlines, counts leading spaces as indent, strips comments. |
 | 3. Parse | `parser.go` | `[]Line` | `*File` | Builds AST: detects `@vars` meta block, task headers (with `HeaderDeps`), body lines (typed `cmd` or `dep` with args), `[exit-on-error]` annotations. |
-| 4. Display | `list.go` | `*File` + `--json` flag | stdout (text/JSON) | Formats and prints all tasks, deps, and vars. Used by `--list`. Branches off after Parse; the main flow continues to Inject. |
-| 5. Inject | `main.go` | `*File` + CLI | `map[string]string` | Merges file vars, built-ins (`CWD`, `OS`, `ARCH`; built-ins override file vars), CLI positional/named/flag args (overwrites all). |
-| 6. Resolve | `resolver.go` | `*File` + task name | `[]*Task` (ordered) | DFS topological sort on `HeaderDeps` only with cycle detection via `stack` map. |
-| 7. Execute | `executor.go` | ordered tasks + vars | exit code | `collectCommands` recursively gathers commands from body lines (inlining `@ dep` calls), builds one combined script per task, runs via `/bin/sh -c`. |
+| 4. ResolveVars | `vars.go` | `file.Vars` | mutated `file.Vars` | Iteratively resolves `{{VAR}}` references in `@vars` values. Skips values containing `$(` — those are deferred to lazy execution. |
+| 5. Display | `list.go` | `*File` + `--json` flag | stdout (text/JSON) | Formats and prints all tasks, deps, and vars. Used by `--list`. Branches off after Parse+ResolveVars; the main flow continues to Inject. |
+| 6. Inject | `main.go` | `*File` + CLI | `map[string]string` | Merges file vars (pre-resolved by ResolveVars), built-ins (`CWD`, `OS`, `ARCH`; built-ins override file vars), CLI positional/named/flag args (overwrites all). |
+| 7. Resolve | `resolver.go` | `*File` + task name | `[]*Task` (ordered) | DFS topological sort on `HeaderDeps` only with cycle detection via `stack` map. |
+| 8. Execute | `executor.go` | ordered tasks + vars | exit code | `collectCommands` recursively gathers commands from body lines (inlining `@ dep` calls with lazy `$(cmd)` resolution and caching), builds one combined script per task, runs via `/bin/sh -c`. |
 
 ---
 
 ## Package Map
 
-### `cmd/run/main.go` (114 lines) — Entry Point
+### `cmd/run/main.go` (120 lines) — Entry Point
 
 **Responsibility:** CLI orchestration.
 
@@ -72,16 +73,17 @@ main()
   ├── config.Load(path)         // read .runner (or ~/.runner.global fallback)
   ├── config.Lex()              // tokenize
   ├── config.Parse()            // build AST
+  ├── config.ResolveVars(file.Vars)  // resolve {{VAR}} references in @vars
   ├── [--list: display.PrintTasks(file, *showJSON), exit]
   ├── [validate task exists]
   ├── build vars map
-  │   ├── maps.Copy(file.Vars)            // from .runner @vars
+  │   ├── maps.Copy(file.Vars)            // from .runner @vars (pre-resolved)
   │   ├── CWD, OS, ARCH                   // built-in env vars
   │   ├── config.ParseArgs(args)          // CLI args → RunArgs
   │   ├── maps.Copy(ra.Named)             // --key value pairs
   │   └── ra.Flags → "true"/"false"       // boolean flags
   ├── engine.Resolve()                    // topological sort
-  ├── engine.Execute(file, order, vars, ra.Positional)   // run commands
+  ├── engine.Execute(file, order, vars, ra.Positional)   // run commands (lazy $(cmd), cached)
 ```
 
 **Key design choices:**
@@ -287,7 +289,7 @@ prints directly to stdout. No return value — the caller handles `os.Exit(0)`.
 
 ---
 
-### `internal/config/loader.go` (15 lines) — File Loader
+### `internal/config/loader.go` (13 lines) — File Loader
 
 **Responsibility:** Read config file from given path.
 
@@ -303,6 +305,23 @@ func Load(path string) ([]byte, error) {
 - No fallback if file doesn't exist — `os.ReadFile` error propagates directly.
 
 ---
+
+### `internal/config/vars.go` (48 lines) — Variable Pre-Resolver
+
+**Responsibility:** Iteratively resolve `{{VAR}}` references in `@vars` values.
+
+```go
+func ResolveVars(vars map[string]string) error {
+    return resolveVarRefs(vars)
+}
+```
+
+**Algorithm:**
+1. Iterate over all vars (max 10 passes), replacing `{{KEY}}` with the target var's value
+2. Skip substitution when the target var's value contains `$(` — those are left for lazy execution in the engine
+3. After convergence, check for remaining `{{KEY}}` patterns pointing to existing vars → circular reference error
+
+Called once in `main.go` after `config.Parse()`, before variable injection.
 
 ### `internal/engine/resolver.go` (40 lines) — Dependency Resolver
 
@@ -347,17 +366,19 @@ at execution time by `collectCommands`.
 
 ---
 
-### `internal/engine/executor.go` (219 lines) — Command Executor
+### `internal/engine/executor.go` (358 lines) — Command Executor
 
 **Responsibility:** Collect all commands (including recursively inlined deps) into one script per task, execute via `/bin/sh -c`.
 
 ```
 Execute(file, order, vars, positional, dry):
+  shellCache := map[string]string{}
   for each task in resolved order:
-    runTask(file, task, vars, positional, dry, empty_stack)
+    runTask(file, task, vars, positional, dry, empty_stack, shellCache)
 
-runTask(file, task, vars, positional, dry, stack):
-  cmds = collectCommands(file, task, vars, positional, stack)
+runTask(file, task, vars, positional, dry, stack, shellCache):
+  cmds, err = collectCommands(file, task, vars, positional, stack, shellCache)
+  if err != nil → return error
   if cmds empty → return
 
   if dry → print each cmd, return
@@ -366,7 +387,7 @@ runTask(file, task, vars, positional, dry, stack):
   run /bin/sh -c script with passthrough stdio
   if error → return error immediately
 
-collectCommands(file, task, vars, positional, stack):
+collectCommands(file, task, vars, positional, stack, shellCache) → ([]string, error):
   if task.Name in stack → CYCLE DETECTED → return error
   add task.Name to stack
 
@@ -374,14 +395,16 @@ collectCommands(file, task, vars, positional, stack):
   for each BodyLine:
     case "cmd":
       strip '!' if present (verbose)
-      cmd = interpolate(text, vars, positional)
+      cmd, err = interpolate(text, vars, positional, shellCache)
+      if err → return error
       if verbose → prepend echo '> cmd'
       append cmd to cmds
 
     case "dep":
       apply line.Args to vars (per-call dep arguments)
       dep = file.Tasks[line.Text]
-      sub = collectCommands(file, dep, vars, positional, stack)
+      sub, err = collectCommands(file, dep, vars, positional, stack, shellCache)
+      if err → return error
       append sub to cmds
       revert line.Args from vars
 
@@ -395,46 +418,41 @@ collectCommands(file, task, vars, positional, stack):
 var tokenRe = regexp.MustCompile(`\{\{(.+?)\}\}`)
 var atRe    = regexp.MustCompile(`^(\d*)(@)(\d*)$`)
 
-func interpolate(s string, vars map[string]string, positional []string) string {
+func interpolate(s string, vars map[string]string, positional []string,
+                 shellCache map[string]string) (string, error) {
+    var firstErr error
     return tokenRe.ReplaceAllStringFunc(s, func(match string) string {
-        inner := match[2 : len(match)-2]
-
-        var primary, fallback string
-        if idx := strings.Index(inner, "||"); idx >= 0 {
-            primary = inner[:idx]
-            fallback = inner[idx+2:]
-        } else {
-            primary = inner
-        }
-
-        if v, ok := resolveAt(primary, vars, positional); ok {
-            if v != "" {
-                return v
-            }
-            if fallback != "" {
-                if v2, ok := vars[fallback]; ok {
-                    return v2
-                }
-                return fallback
-            }
-        }
-
-        if fallback != "" {
-            if v, ok := vars[fallback]; ok {
-                return v
-            }
-            return fallback
-        }
-
-        return match
-    })
+        // ... split primary/fallback ...
+        // @ patterns → resolveAt(primary, positional)
+        // regular vars → resolveLazyValue(key, vars, positional, shellCache, 0)
+        // any $(cmd) failure → firstErr = err, propagation stops execution
+    }), firstErr
 }
 ```
 
-The `resolveAt()` function handles `{{@}}`, `{{@N}}`, `{{N@}}`, and `{{M@N}}` patterns from the
-`positional` slice. Tokens that don't match the `@` regex are looked up in the `vars` map as before.
+`resolveLazyValue(key, vars, positional, shellCache, depth)` recursively resolves `{{}}`
+references and `$(cmd)` shell substitutions:
+1. If key not in vars map → not found
+2. If key is in `shellCache` → return cached value
+3. If raw value contains `{{}}` → recursively resolve each referenced key
+4. If raw value contains `$(cmd)` → execute via `/bin/sh -c` with all vars as env, cache result under key
+5. Depth limit of 10 prevents infinite recursion
+
+The `resolveAt()` function handles only `{{@}}`, `{{@N}}`, `{{N@}}`, and `{{M@N}}` patterns
+from the `positional` slice. Non-`@` tokens are dispatched to `resolveLazyValue` for regular
+var lookups with lazy `$(cmd)` resolution.
 
 **Key characteristics:**
+- **Shell substitution (`$(cmd)`) is lazy** — `$(` patterns in var values are detected at
+  resolution time, executed via `/bin/sh -c`, and cached in `shellCache` to avoid repeated
+  execution.
+- **`interpolate()` returns `(string, error)`** — a failed `$(cmd)` propagates through the
+  call chain (`interpolate → collectCommands → runTask → Execute`), halting all further tasks
+  with a clear error message.
+- **Recursive `resolveLazyValue`** — resolves chains of `{{VAR}}` references (e.g.,
+  `DESC="{{GREET}} {{HOST}}"` where `HOST="$(hostname)"`) with a depth limit of 10.
+- **`shellCache` threaded through all** — `Execute → runTask → collectCommands → interpolate`
+  ensures `$(cmd)` results are shared across all tasks and inline deps in a single run.
 - **Regex-based token matching** — finds each `{{...}}` token individually, avoiding the
   substring corruption problem of naive `ReplaceAll`. Config: `\{\{(.+?)\}\}`.
 - **`{{key||default}}` fallback syntax** — if `key` is not found or is empty string, the
@@ -449,7 +467,8 @@ The `resolveAt()` function handles `{{@}}`, `{{@N}}`, `{{N@}}`, and `{{M@N}}` pa
   collected into one shell script. Shell variables (`$MSG`) persist across `@ dep` boundaries.
 - **Verbose mode (`!` prefix)** — emits `echo '> <cmd>'` inline in the combined script before
   the command itself, so verbose output appears correctly in the single-shell session.
-- **Dry-run** prints the flat list of collected commands in order, without execution.
+- **Dry-run** prints the flat list of collected commands in order, without execution (but
+  `$(cmd)` still executes — the values are needed for interpolation).
 - **Inline dep recursion** — `collectCommands` walks `BodyLines`, and for each `"dep"` line
   recursively collects the target task's commands. Per-call dep args are applied to vars during
   collection and cleaned up afterward.
@@ -553,7 +572,7 @@ test:
 | Custom file format (not YAML/TOML) | Minimal, task-runner-specific syntax | Steep learning curve, no ecosystem tooling |
 | `/bin/sh -c` execution | Shell features work (pipes, redirects) | Shell injection, platform-specific |
 | Regex-based variable interpolation | Avoids substring corruption, enables fallback syntax | Regex compile cost (one-time) vs naive ReplaceAll |
-| 90 unit tests across 5 files | Safety net for refactoring | No integration or end-to-end tests |
+| 106 unit tests across 6 files | Safety net for refactoring | No integration or end-to-end tests |
 | Single `/bin/sh -c` per task with command inlining | Shell variable persistence across `@ dep` boundaries | Larger script per task, harder to debug individual failures |
 | Sequential execution (no `--keep-going`) | Simplicity | First failure aborts all remaining tasks |
 | `--file` flag for custom config paths | Flexibility without breaking default | No upward directory search |

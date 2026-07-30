@@ -27,7 +27,7 @@ executes commands through `/bin/sh -c`.
 | `./build/run --dry <task>` | Dry-run (print commands, no exec) |
 | `./build/run install` | Installs to `~/.config/hypr/bin/run` |
 
-There are **73 test cases** across 5 test files. There is no CI.
+There are **106 test cases** across 6 test files. There is no CI.
 
 ---
 
@@ -65,7 +65,7 @@ There are **73 test cases** across 5 test files. There is no CI.
 ### Tests
 - Standard Go `_test.go` files in each package.
 - Table-driven tests where appropriate.
-- `interpolate()` is tested as a pure function (no shell execution in unit tests).
+- `interpolate()` and `resolveLazyValue()` are tested with shell execution commands (e.g., `$(echo ...)`, `$(sh -c 'exit 1')`).
 
 ---
 
@@ -82,13 +82,15 @@ internal/config/
   args.go                  — ParseArgs CLI argument parser
   args_test.go             — ParseArgs unit tests
   loader.go                — Reads .runner from given path
+  vars.go                  — Resolves {{VAR}} references in @vars values
+  vars_test.go             — ResolveVars unit tests
 internal/display/
   list.go                  — --list output formatting (pretty text + JSON)
 internal/engine/
   resolver.go              — Topological sort of task DAG with cycle detection
   resolver_test.go         — Resolver unit tests
-  executor.go              — Collects task commands recursively, executes combined script via /bin/sh -c
-  executor_test.go         — Interpolate unit tests
+  executor.go              — Collects task commands recursively, lazy $(cmd) + caching, executes via /bin/sh -c
+  executor_test.go         — Interpolate & resolveLazyValue unit tests
 ```
 
 ---
@@ -96,19 +98,20 @@ internal/engine/
 ## Data Flow
 
 ```
-.runner file ──→ Load ──→ Lex ──→ Parse ──→ *File (AST)
-                                                 │
-CLI args ──→ ParseArgs ──→ vars map ─────────────┤
-                                                 ▼
-                                          Resolve ──→ Execute ──→ /bin/sh -c
+.runner file ──→ Load ──→ Lex ──→ Parse ──→ ResolveVars ──→ *File (AST)
+                                                                 │
+CLI args ──→ ParseArgs ──→ vars map ────────────────────────────┤
+                                                                 ▼
+                                                          Resolve ──→ Execute ──→ /bin/sh -c
 ```
 
 1. **Load** — read `.runner` from CWD (`loader.go`)
 2. **Lex** — split text into lines with indent info, strip comments (`lexer.go`)
 3. **Parse** — build AST (`@vars`, tasks with deps/commands) from lines (`parser.go`)
-4. **Inject** — merge file vars, built-ins (`CWD`, `OS`, `ARCH`), and CLI args into `vars` map
-5. **Resolve** — topological sort of task DAG (DFS with cycle detection)
-6. **Execute** — collect all commands (including recursively inlined deps) into one script per task, run via `/bin/sh -c`
+4. **ResolveVars** — resolve `{{VAR}}` references in `@vars` values via `config.ResolveVars(file.Vars)`. Skips values containing `$(` (deferred to lazy execution).
+5. **Inject** — merge file vars (pre-resolved), built-ins (`CWD`, `OS`, `ARCH`), and CLI args into `vars` map
+6. **Resolve** — topological sort of task DAG (DFS with cycle detection)
+7. **Execute** — collect all commands (including recursively inlined deps with lazy `$(cmd)` resolution + caching) into one script per task, run via `/bin/sh -c`
 
 ---
 
@@ -127,10 +130,13 @@ CLI args ──→ ParseArgs ──→ vars map ──────────�
    Good for interactive commands but means there's no output capture.
 
 5. **Variable interpolation uses regex** — the `interpolate()` function in `executor.go` uses
-   `regexp.MustCompile(\{\{(.+?)\}\})` to find all `{{...}}` tokens and resolve them individually.
-   This avoids the substring corruption problem of naive `ReplaceAll`. The `{{key||default}}`
-   syntax provides a fallback: if `key` is not found or empty, `default` is used (resolved as
-   a variable key first, then as a literal string).
+   `regexp.MustCompile(\{\{(.+?)\}\})` to find all `{{...}}` tokens and resolve them individually
+   via `resolveLazyValue()`. This avoids the substring corruption problem of naive `ReplaceAll`.
+   The `{{key||default}}` syntax provides a fallback: if `key` is not found or empty, `default`
+   is used (resolved as a variable key first, then as a literal string). `interpolate` returns
+   `(string, error)` — a failed `$(cmd)` halts execution. File vars are pre-resolved by
+   `config.ResolveVars()` before execution; values containing `$(` are kept as-is for lazy
+   evaluation at runtime with a `shellCache` to avoid repeated execution.
 
 ---
 
@@ -150,7 +156,7 @@ The parser currently supports `@vars` as the only meta block. To add a new meta 
 - **Adding a new type?** Put it in `ast.go` — that's the single source of truth for types.
 - **New meta block?** Add a `parseXxx()` method to the `parser` struct and a branch in `dispatchHeader()`.
 - **New CLI flag?** Use `flag` stdlib in `main.go`, then add it to the vars map before resolve.
-- **New built-in variable?** Add it in `main.go` around lines 96-98 where `CWD`/`OS`/`ARCH` are set.
+- **New built-in variable?** Add it in `main.go` around lines 87-89 where `CWD`/`OS`/`ARCH` are set.
 - **Changing the lexer?** Make sure to preserve the comment stripping rules (full-line `#` vs inline at indent 0).
 - **Adding execution features?** Modify `executor.go` — that's the sole execution engine.
 - **Adding tests?** Put them in the same package with `_test.go` suffix. Use table-driven tests.

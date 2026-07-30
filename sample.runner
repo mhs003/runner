@@ -1,6 +1,16 @@
+# {{VAR}} cross-references — vars can reference each other
+# {{GREET}} → "Hello world", {{DESC}} → "Hello world from runner"
 @vars:
   BIN = app
   PORT = 8080
+  NAME = world
+  GREET = Hello {{NAME}}
+  DESC = {{GREET}} from runner
+  # $(cmd) — lazy shell substitution, executed on first use, cached
+  # {{HOST}} runs hostname once, second use is cache hit
+  HOST = $(hostname)
+  TOOL = go
+  WHERE = $(which $TOOL)
 
 # session sharing — shell state persists across lines in a task
 main:
@@ -64,3 +74,18 @@ mid:
 # $ run mixed -p conf Hello World   → echo conf Hello World
 mixed:
     echo {{-p}} {{@}}
+
+# {{VAR}} ref chain — {{DESC}} → {{GREET}} → {{NAME}} → "Hello world from runner"
+desc:
+    echo {{DESC}}
+
+# lazy $(cmd) — {{HOST}} executes hostname, cached; second use is cache hit
+# {{WHERE}} runs which $TOOL, inherits TOOL=go from @vars env
+info:
+    echo host={{HOST}}
+    echo where={{WHERE}}
+
+# cache proof — {{HOST}} used twice, hostname runs only once
+proof:
+    echo first={{HOST}}
+    echo second={{HOST}}
