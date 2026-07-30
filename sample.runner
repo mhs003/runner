@@ -32,3 +32,35 @@ dev:frontend:
 hello:
     echo "test test"
     echo "hello world"
+
+# {{@}} — positional CLI args passed through
+# $ run greet Hello World          → echo Hello World
+# $ run greet -p conf Hello World  → echo Hello World
+greet:
+    echo {{@}}
+
+# {{@||fallback}} — fallback when no args given
+# $ run greet2                      → echo no args
+# $ run greet2 Hello World          → echo Hello World
+greet2:
+    echo {{@||no args}}
+
+# {{@N}} — first N args
+# $ run pick2 a b c d e             → echo a b
+pick2:
+    echo {{@2}}
+
+# {{N@}} — last N args
+# $ run last2 a b c d e             → echo d e
+last2:
+    echo {{2@}}
+
+# {{M@N}} — args from position M to N (1-indexed, inclusive)
+# $ run mid a b c d e               → echo b c d
+mid:
+    echo {{2@4}}
+
+# mixed named flags + {{@}} — named stripped, positionals go to @
+# $ run mixed -p conf Hello World   → echo conf Hello World
+mixed:
+    echo {{-p}} {{@}}

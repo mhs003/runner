@@ -6,7 +6,7 @@
 custom DSL inspired by `just`/`Make`), parses it with a hand-written lexer and parser, resolves
 inter-task dependencies via topological sort, and executes shell commands through `/bin/sh -c`.
 
-The entire project is ~760 lines of Go, spread across 9 source files in 4 packages (plus 5 test files).
+The entire project is ~814 lines of Go, spread across 9 source files in 4 packages (plus 5 test files with 90 test cases).
 There are no external dependencies and no CI.
 
 ---
@@ -53,7 +53,7 @@ There are no external dependencies and no CI.
 | 2. Lex | `lexer.go` | raw text | `[]Line` | Splits by newlines, counts leading spaces as indent, strips comments. |
 | 3. Parse | `parser.go` | `[]Line` | `*File` | Builds AST: detects `@vars` meta block, task headers (with `HeaderDeps`), body lines (typed `cmd` or `dep` with args), `[exit-on-error]` annotations. |
 | 4. Display | `list.go` | `*File` + `--json` flag | stdout (text/JSON) | Formats and prints all tasks, deps, and vars. Used by `--list`. Branches off after Parse; the main flow continues to Inject. |
-| 5. Inject | `main.go` | `*File` + CLI | `map[string]string` | Merges file vars, built-ins (`CWD`, `OS`, `ARCH`), CLI positional/named/flag args. |
+| 5. Inject | `main.go` | `*File` + CLI | `map[string]string` | Merges file vars, built-ins (`CWD`, `OS`, `ARCH`; built-ins override file vars), CLI positional/named/flag args (overwrites all). |
 | 6. Resolve | `resolver.go` | `*File` + task name | `[]*Task` (ordered) | DFS topological sort on `HeaderDeps` only with cycle detection via `stack` map. |
 | 7. Execute | `executor.go` | ordered tasks + vars | exit code | `collectCommands` recursively gathers commands from body lines (inlining `@ dep` calls), builds one combined script per task, runs via `/bin/sh -c`. |
 
@@ -81,15 +81,16 @@ main()
   │   ├── maps.Copy(ra.Named)             // --key value pairs
   │   └── ra.Flags → "true"/"false"       // boolean flags
   ├── engine.Resolve()                    // topological sort
-  └── engine.Execute(file, order, vars)   // run commands
+  ├── engine.Execute(file, order, vars, ra.Positional)   // run commands
 ```
 
 **Key design choices:**
 - `panic` for load errors (file not found) — considered unrecoverable.
 - `fmt.Println(err); os.Exit(1)` for parse/resolve/exec errors — user-facing.
-- Variables are accumulated in a single `map[string]string` with progressive `maps.Copy` calls:
-  Built-ins `CWD`, `OS`, `ARCH` are set first, then file vars overwrite them, then CLI named/flag
-  vars overwrite again. This gives CLI args highest precedence.
+- Variables are accumulated in a single `map[string]string` with progressive assignments:
+  File vars are set first, then built-ins (`CWD`, `OS`, `ARCH`) overwrite them, then CLI
+  positional, named, and flag vars overwrite again. This gives CLI args highest precedence
+  and built-ins override file vars.
 
 ---
 
@@ -346,17 +347,17 @@ at execution time by `collectCommands`.
 
 ---
 
-### `internal/engine/executor.go` (143 lines) — Command Executor
+### `internal/engine/executor.go` (219 lines) — Command Executor
 
 **Responsibility:** Collect all commands (including recursively inlined deps) into one script per task, execute via `/bin/sh -c`.
 
 ```
-Execute(file, order, vars, dry):
+Execute(file, order, vars, positional, dry):
   for each task in resolved order:
-    runTask(file, task, vars, dry, empty_stack)
+    runTask(file, task, vars, positional, dry, empty_stack)
 
-runTask(file, task, vars, dry, stack):
-  cmds = collectCommands(file, task, vars, stack)
+runTask(file, task, vars, positional, dry, stack):
+  cmds = collectCommands(file, task, vars, positional, stack)
   if cmds empty → return
 
   if dry → print each cmd, return
@@ -365,7 +366,7 @@ runTask(file, task, vars, dry, stack):
   run /bin/sh -c script with passthrough stdio
   if error → return error immediately
 
-collectCommands(file, task, vars, stack):
+collectCommands(file, task, vars, positional, stack):
   if task.Name in stack → CYCLE DETECTED → return error
   add task.Name to stack
 
@@ -373,14 +374,14 @@ collectCommands(file, task, vars, stack):
   for each BodyLine:
     case "cmd":
       strip '!' if present (verbose)
-      cmd = interpolate(text, vars)
+      cmd = interpolate(text, vars, positional)
       if verbose → prepend echo '> cmd'
       append cmd to cmds
 
     case "dep":
       apply line.Args to vars (per-call dep arguments)
       dep = file.Tasks[line.Text]
-      sub = collectCommands(file, dep, vars, stack)
+      sub = collectCommands(file, dep, vars, positional, stack)
       append sub to cmds
       revert line.Args from vars
 
@@ -392,8 +393,9 @@ collectCommands(file, task, vars, stack):
 
 ```go
 var tokenRe = regexp.MustCompile(`\{\{(.+?)\}\}`)
+var atRe    = regexp.MustCompile(`^(\d*)(@)(\d*)$`)
 
-func interpolate(s string, vars map[string]string) string {
+func interpolate(s string, vars map[string]string, positional []string) string {
     return tokenRe.ReplaceAllStringFunc(s, func(match string) string {
         inner := match[2 : len(match)-2]
 
@@ -405,8 +407,16 @@ func interpolate(s string, vars map[string]string) string {
             primary = inner
         }
 
-        if v, ok := vars[primary]; ok && v != "" {
-            return v
+        if v, ok := resolveAt(primary, vars, positional); ok {
+            if v != "" {
+                return v
+            }
+            if fallback != "" {
+                if v2, ok := vars[fallback]; ok {
+                    return v2
+                }
+                return fallback
+            }
         }
 
         if fallback != "" {
@@ -421,6 +431,9 @@ func interpolate(s string, vars map[string]string) string {
 }
 ```
 
+The `resolveAt()` function handles `{{@}}`, `{{@N}}`, `{{N@}}`, and `{{M@N}}` patterns from the
+`positional` slice. Tokens that don't match the `@` regex are looked up in the `vars` map as before.
+
 **Key characteristics:**
 - **Regex-based token matching** — finds each `{{...}}` token individually, avoiding the
   substring corruption problem of naive `ReplaceAll`. Config: `\{\{(.+?)\}\}`.
@@ -429,6 +442,9 @@ func interpolate(s string, vars map[string]string) string {
   like `{{--entry||ENTRY}}` (CLI override with file-var fallback).
 - **Unknown tokens preserved** — `{{MISSING}}` with no matching variable is left as-is in
   the output.
+- **Positional arg patterns** — `{{@}}` (all), `{{@N}}` (first N), `{{N@}}` (last N), `{{M@N}}`
+  (range M through N, 1-indexed inclusive) resolve from the positional CLI args slice. All
+  support `||` fallback syntax. Inherited by inline deps with the same top-level positional args.
 - **Single `/bin/sh -c` per task** — all commands (including recursively inlined deps) are
   collected into one shell script. Shell variables (`$MSG`) persist across `@ dep` boundaries.
 - **Verbose mode (`!` prefix)** — emits `echo '> <cmd>'` inline in the combined script before
@@ -475,6 +491,11 @@ empty_line     = ""
 {{ARCH}}            — built-in: runtime.GOARCH
 {{ARGS}}            — all positional CLI args joined by space
 {{1}}, {{2}}, ...   — individual positional CLI args
+{{@}}               — all positional CLI args joined by space
+{{@N}}              — first N positional args (e.g. {{@2}} → first 2)
+{{N@}}              — last N positional args (e.g. {{2@}} → last 2)
+{{M@N}}             — positional args from position M to N (1-indexed, inclusive)
+{{@||default}}      — fallback works with all @ variants
 {{--key}}           — named CLI arg (--key value)
 {{-k}}              — named short CLI arg (-k value)
 {{--flag}}          — boolean CLI flag (→ "true" or "false")
@@ -486,8 +507,8 @@ empty_line     = ""
 ### Variable Precedence (highest wins)
 
 ```
-Built-ins (CWD, OS, ARCH)        ← lowest
-  └─ File vars (@vars block)
+File vars (@vars block)           ← lowest
+  └─ Built-ins (CWD, OS, ARCH)
       └─ CLI positional (1, 2, ...)
           └─ CLI named args (--key, -k)
               └─ CLI flags (--flag, -f)  ← highest
@@ -532,7 +553,7 @@ test:
 | Custom file format (not YAML/TOML) | Minimal, task-runner-specific syntax | Steep learning curve, no ecosystem tooling |
 | `/bin/sh -c` execution | Shell features work (pipes, redirects) | Shell injection, platform-specific |
 | Regex-based variable interpolation | Avoids substring corruption, enables fallback syntax | Regex compile cost (one-time) vs naive ReplaceAll |
-| 73 unit tests across 5 files | Safety net for refactoring | No integration or end-to-end tests |
+| 90 unit tests across 5 files | Safety net for refactoring | No integration or end-to-end tests |
 | Single `/bin/sh -c` per task with command inlining | Shell variable persistence across `@ dep` boundaries | Larger script per task, harder to debug individual failures |
 | Sequential execution (no `--keep-going`) | Simplicity | First failure aborts all remaining tasks |
 | `--file` flag for custom config paths | Flexibility without breaking default | No upward directory search |
