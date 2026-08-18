@@ -49,10 +49,10 @@ There are no external dependencies and no CI.
 
 | Stage | File | Input | Output | Description |
 |-------|------|-------|--------|-------------|
-| 1. Load | `loader.go` | file system | `[]byte` | Reads config file from given path. |
-| 2. Lex | `lexer.go` | raw text | `[]Line` | Splits by newlines, counts leading spaces as indent, strips comments. |
-| 3. Parse | `parser.go` | `[]Line` | `*File` | Builds AST: detects `@vars` meta block, task headers (with `HeaderDeps`), body lines (typed `cmd` or `dep` with args), `[exit-on-error]` annotations. |
-| 4. ResolveVars | `vars.go` | `file.Vars` | mutated `file.Vars` | Iteratively resolves `{{VAR}}` references in `@vars` values. Skips values containing `$(` — those are deferred to lazy execution. |
+| 1. Load | `main.go`, `loader.go` | file system | source bytes | Loads both the local and global configs by default, or only an explicit `--file`. |
+| 2. Lex | `lexer.go` | raw text | `[]Line` | Splits each source by newlines, counts leading spaces as indent, strips comments. |
+| 3. Parse | `parser.go`, `loader.go` | `[]Line` | `*File` | Builds one AST per source and merges global entries before local entries. Local names win; unique tasks and vars from both sources remain. |
+| 4. ResolveVars | `vars.go` | `file.Vars` | mutated `file.Vars` | Iteratively resolves `{{VAR}}` references across the merged variable map. Skips values containing `$(` — those are deferred to lazy execution. |
 | 5. Display | `list.go` | `*File` + `--json` flag | stdout (text/JSON) | Formats and prints all tasks, deps, and vars. Used by `--list`. Branches off after Parse+ResolveVars; the main flow continues to Inject. |
 | 6. Inject | `main.go` | `*File` + CLI | `map[string]string` | Merges file vars (pre-resolved by ResolveVars), built-ins (`CWD`, `OS`, `ARCH`; built-ins override file vars), CLI positional/named/flag args (overwrites all). |
 | 7. Resolve | `resolver.go` | `*File` + task name | `[]*Task` (ordered) | DFS topological sort on `HeaderDeps` only with cycle detection via `stack` map. |
@@ -70,10 +70,9 @@ There are no external dependencies and no CI.
 main()
   ├── flag.Parse()              // --list, --dry, --file, --init, --json
   ├── [--init: scaffold .runner, exit]
-  ├── config.Load(path)         // read .runner (or ~/.runner.global fallback)
-  ├── config.Lex()              // tokenize
-  ├── config.Parse()            // build AST
-  ├── config.ResolveVars(file.Vars)  // resolve {{VAR}} references in @vars
+  ├── loadConfig()              // parse local + global, or explicit --file only
+  ├── config.Merge()            // global first, local overrides
+  ├── config.ResolveVars(file.Vars)  // resolve merged, cross-file var references
   ├── [--list: display.PrintTasks(file, *showJSON), exit]
   ├── [validate task exists]
   ├── build vars map
@@ -87,7 +86,9 @@ main()
 ```
 
 **Key design choices:**
-- `panic` for load errors (file not found) — considered unrecoverable.
+- Missing local or global default files are optional; if both are missing, startup fails.
+- Read and parse errors from either present config are user-facing and stop startup.
+- An explicitly selected `--file` is standalone and is not merged with the global config.
 - `fmt.Println(err); os.Exit(1)` for parse/resolve/exec errors — user-facing.
 - Variables are accumulated in a single `map[string]string` with progressive assignments:
   File vars are set first, then built-ins (`CWD`, `OS`, `ARCH`) overwrite them, then CLI

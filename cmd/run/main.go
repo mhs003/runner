@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"maps"
@@ -20,6 +21,12 @@ func main() {
 	filePath := flag.String("file", ".runner", "Path to runner config file")
 	doInit := flag.Bool("init", false, "Initialize a .runner file in current directory")
 	flag.Parse()
+	fileExplicit := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "file" {
+			fileExplicit = true
+		}
+	})
 
 	if *doInit {
 		if _, err := os.Stat(".runner"); err == nil {
@@ -40,24 +47,12 @@ func main() {
 		args = args[1:]
 	}
 
-	data, err := config.Load(*filePath)
+	file, err := loadConfig(*filePath, fileExplicit)
 	if err != nil {
-		if *filePath == ".runner" {
-			home, homeErr := os.UserHomeDir()
-			if homeErr == nil {
-				globalPath := home + "/.runner.global"
-				data, err = config.Load(globalPath)
-			}
+		if errors.Is(err, errNoConfig) {
+			fmt.Fprintln(os.Stderr, "No config found")
+			os.Exit(1)
 		}
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "No config found\n")
-		os.Exit(1)
-	}
-
-	lines := config.Lex(string(data))
-	file, err := config.Parse(lines)
-	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
@@ -117,4 +112,44 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+}
+
+var errNoConfig = errors.New("no config found")
+
+func loadConfig(path string, explicit bool) (*config.File, error) {
+	if explicit {
+		file, err := loadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, errNoConfig
+		}
+		return file, err
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	local, localErr := loadFile(path)
+	if localErr != nil && !errors.Is(localErr, os.ErrNotExist) {
+		return nil, localErr
+	}
+
+	global, globalErr := loadFile(home + "/.runner.global")
+	if globalErr != nil && !errors.Is(globalErr, os.ErrNotExist) {
+		return nil, globalErr
+	}
+
+	if local == nil && global == nil {
+		return nil, errNoConfig
+	}
+	return config.Merge(global, local), nil
+}
+
+func loadFile(path string) (*config.File, error) {
+	data, err := config.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	return config.Parse(config.Lex(string(data)))
 }

@@ -48,7 +48,11 @@ main:
 | `--file <path>` | Config file path (default: `.runner`) |
 | `--init` | Scaffold a `.runner` in the current directory |
 
-**Fallback:** If `.runner` is not found locally, falls back to `~/.runner.global`.
+**Config sources:** With the default path, Runner loads both `.runner` in the current directory
+and `~/.runner.global`. Local tasks and variables override global entries with the same name;
+entries unique to either file remain available, and tasks and variables can reference entries in
+the other file. If only one file exists, it is used on its own. An explicit `--file <path>` loads
+only that file and does not merge the global config.
 
 ```bash
 # ALL of these work

@@ -110,8 +110,11 @@ Applies to the immediately following task only.
 | `-file <path>` | Use a config file other than `.runner` |
 | `-init` | Scaffold a `.runner` file in the current directory |
 
-Runner falls back to `~/.runner.global` when no `.runner` exists in the current directory
-and `-file` uses the default value.
+With the default config path, Runner loads both `.runner` in the current directory and
+`~/.runner.global`. Local tasks and variables override global entries with the same name, while
+entries unique to either file remain available. Tasks and variables can reference entries from
+the other file. If only one file exists, it is used on its own. An explicit `-file <path>` loads
+only that file and does not merge the global config.
 
 ## Install
 
