@@ -11,8 +11,8 @@ type Dep struct {
 }
 
 type BodyLine struct {
-	Type string // "cmd" or "dep"
-	Text string // command text (with ! prefix) or dep name
+	Type string   // "cmd" or "dep"
+	Text string   // command text (with ! prefix) or dep name
 	Args []string // dep arguments (only for "dep" type)
 }
 
@@ -25,6 +25,7 @@ type Task struct {
 
 type RunArgs struct {
 	Positional []string
+	All        []string
 	Named      map[string]string
 	Flags      map[string]bool
 }

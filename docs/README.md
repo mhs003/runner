@@ -162,7 +162,7 @@ build:
 - Args passed to `@ <dep>` are injected as variables into the dep's scope
 - Dep args only override variables that don't already exist
 - After the dep completes, newly-introduced vars are cleaned up
-- **CLI-level positional args (`{{@}}`) are NOT overridden by dep-call-site args** — they always resolve to top-level CLI positionals
+- **CLI-level args (`{{@}}`) are NOT overridden by dep-call-site args** — they always resolve to the complete top-level CLI task arguments
 
 ### Comments
 
@@ -228,13 +228,13 @@ test:
 | `{{@3}}` | | `a b c` |
 | `{{2@}}` | | `d e` |
 | `{{2@4}}` | | `b c d` |
-| `{{@}}` (no args) | | stays as `{{@}}` |
+| `{{@}}` (no args) | | empty string |
 | `{{@\|\|fallback}}` (no args) | | `fallback` |
-| `{{4@2}}` (M > N) | | stays as `{{4@2}}` |
+| `{{4@2}}` (M > N) | | empty string |
 
-- Negative/zero N → stays as literal (invalid)
+- Negative/zero N → empty string (invalid)
 - Exceeds length → clamped to available args
-- Named/flags are stripped by `ParseArgs` before `{{@}}` sees them
+- `{{@}}` includes all task arguments in their original order, including named arguments and flags
 
 ### Fallback Syntax
 
@@ -268,7 +268,7 @@ Each subsequent layer overwrites the previous. CLI flags always win.
 | `--verbose` | Flag | `{{--verbose}}` → `"true"` |
 | `-v` | Flag | `{{-v}}` → `"true"` |
 | `-abc` | 3 flags | `{{-a}}`, `{{-b}}`, `{{-c}}` → `"true"` |
-| `foo bar` | Positional | `{{1}}`=foo, `{{2}}`=bar, `{{@}}`=`foo bar` |
+| `foo bar --path=x -v` | Mixed | `{{1}}`=foo, `{{2}}`=bar, `{{@}}`=`foo bar --path=x -v` |
 
 **Limitations:**
 - `--key` followed by `--other` → `--key` treated as boolean flag
@@ -335,9 +335,9 @@ No visual distinction between commands from the parent task vs commands from inl
 | **Fallback resolved as var** | `{{X\|\|Y}}` — if `Y` is a valid variable, its value is used. Use `{{X\|\| literal}}` for literals. |
 | **`--dry` prints flat** | No visual separation between parent and dep commands. Also: `$(cmd)` in vars still runs during dry-run (needed for interpolation). |
 | **No `--help`** | Go's `flag` package auto-generates basic help via `-h` |
-| **`{{@}}` in deps** | `{{@}}` inside an inline dep's body resolves to **top-level CLI** positional args, not dep-call-site args |
-| **Empty `@` stays** | `{{@}}` with no args stays as `{{@}}`. Use `{{@\|\|}}` for empty string. |
-| **Range `M@N` clamp** | If N > len(args), clamps to max. If M > N, token stays as literal. |
+| **`{{@}}` in deps** | `{{@}}` inside an inline dep's body resolves to all **top-level CLI** task args, not dep-call-site args |
+| **Empty `@`** | `{{@}}` with no args resolves to an empty string. Use `{{@\|\|fallback}}` for a default. |
+| **Range `M@N` clamp** | If N > len(args), clamps to max. If M > N, the token becomes empty. |
 
 ---
 

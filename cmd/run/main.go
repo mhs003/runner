@@ -108,7 +108,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := engine.Execute(file, order, vars, ra.Positional, *dry); err != nil {
+	if err := engine.Execute(file, order, vars, ra.Positional, ra.All, *dry); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}

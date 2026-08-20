@@ -439,9 +439,11 @@ references and `$(cmd)` shell substitutions:
 4. If raw value contains `$(cmd)` → execute via `/bin/sh -c` with all vars as env, cache result under key
 5. Depth limit of 10 prevents infinite recursion
 
-The `resolveAt()` function handles only `{{@}}`, `{{@N}}`, `{{N@}}`, and `{{M@N}}` patterns
-from the `positional` slice. Non-`@` tokens are dispatched to `resolveLazyValue` for regular
-var lookups with lazy `$(cmd)` resolution.
+The `resolveAt()` function handles `{{@}}`, `{{@N}}`, `{{N@}}`, and `{{M@N}}` patterns.
+`{{@}}` uses the complete original CLI argument slice, while the other patterns use only the
+positional slice. Non-`@` tokens are dispatched to `resolveLazyValue` for regular var lookups
+with lazy `$(cmd)` resolution. Missing tokens resolve to an empty string; `||` can provide a
+fallback when an argument or variable is absent.
 
 **Key characteristics:**
 - **Shell substitution (`$(cmd)`) is lazy** — `$(` patterns in var values are detected at
@@ -459,11 +461,12 @@ var lookups with lazy `$(cmd)` resolution.
 - **`{{key||default}}` fallback syntax** — if `key` is not found or is empty string, the
   `default` is tried first as a variable key, then as a literal string. This allows patterns
   like `{{--entry||ENTRY}}` (CLI override with file-var fallback).
-- **Unknown tokens preserved** — `{{MISSING}}` with no matching variable is left as-is in
-  the output.
-- **Positional arg patterns** — `{{@}}` (all), `{{@N}}` (first N), `{{N@}}` (last N), `{{M@N}}`
-  (range M through N, 1-indexed inclusive) resolve from the positional CLI args slice. All
-  support `||` fallback syntax. Inherited by inline deps with the same top-level positional args.
+- **Unknown tokens become empty** — `{{MISSING}}` with no matching variable is replaced with an
+  empty string. Use `{{MISSING||default}}` when a fallback is needed.
+- **Positional arg patterns** — `{{@}}` (all original CLI args, including flags), `{{@N}}` (first
+  N), `{{N@}}` (last N), `{{M@N}}` (range M through N, 1-indexed inclusive) resolve from the
+  appropriate CLI arg slices. All support `||` fallback syntax. Inherited by inline deps with
+  the same top-level CLI args.
 - **Single `/bin/sh -c` per task** — all commands (including recursively inlined deps) are
   collected into one shell script. Shell variables (`$MSG`) persist across `@ dep` boundaries.
 - **Verbose mode (`!` prefix)** — emits `echo '> <cmd>'` inline in the combined script before
@@ -511,7 +514,7 @@ empty_line     = ""
 {{ARCH}}            — built-in: runtime.GOARCH
 {{ARGS}}            — all positional CLI args joined by space
 {{1}}, {{2}}, ...   — individual positional CLI args
-{{@}}               — all positional CLI args joined by space
+{{@}}               — all original CLI task args joined by space, including named args and flags
 {{@N}}              — first N positional args (e.g. {{@2}} → first 2)
 {{N@}}              — last N positional args (e.g. {{2@}} → last 2)
 {{M@N}}             — positional args from position M to N (1-indexed, inclusive)

@@ -13,18 +13,18 @@ import (
 var tokenRe = regexp.MustCompile(`\{\{(.+?)\}\}`)
 var atRe = regexp.MustCompile(`^(\d*)(@)(\d*)$`)
 
-func Execute(f *config.File, order []*config.Task, vars map[string]string, positional []string, dry bool) error {
+func Execute(f *config.File, order []*config.Task, vars map[string]string, positional, allArgs []string, dry bool) error {
 	shellCache := map[string]string{}
 	for _, t := range order {
-		if err := runTask(f, t, vars, positional, dry, map[string]bool{}, shellCache); err != nil {
+		if err := runTask(f, t, vars, positional, allArgs, dry, map[string]bool{}, shellCache); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runTask(f *config.File, t *config.Task, vars map[string]string, positional []string, dry bool, stack map[string]bool, shellCache map[string]string) error {
-	cmds, err := collectCommands(f, t, vars, positional, stack, shellCache)
+func runTask(f *config.File, t *config.Task, vars map[string]string, positional, allArgs []string, dry bool, stack map[string]bool, shellCache map[string]string) error {
+	cmds, err := collectCommands(f, t, vars, positional, allArgs, stack, shellCache)
 	if err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func runTask(f *config.File, t *config.Task, vars map[string]string, positional 
 	return ec.Run()
 }
 
-func collectCommands(f *config.File, t *config.Task, vars map[string]string, positional []string, stack map[string]bool, shellCache map[string]string) ([]string, error) {
+func collectCommands(f *config.File, t *config.Task, vars map[string]string, positional, allArgs []string, stack map[string]bool, shellCache map[string]string) ([]string, error) {
 	if stack[t.Name] {
 		return nil, fmt.Errorf("circular dependency detected at '%s'", t.Name)
 	}
@@ -72,7 +72,7 @@ func collectCommands(f *config.File, t *config.Task, vars map[string]string, pos
 				shouldVerbose = true
 				c = c[1:]
 			}
-			cmd, err := interpolate(c, vars, positional, shellCache)
+			cmd, err := interpolate(c, vars, positional, shellCache, allArgs)
 			if err != nil {
 				return nil, err
 			}
@@ -105,7 +105,7 @@ func collectCommands(f *config.File, t *config.Task, vars map[string]string, pos
 				return nil, fmt.Errorf("unknown dependency task '%s'", line.Text)
 			}
 
-			sub, err := collectCommands(f, dep, vars, positional, stack, shellCache)
+			sub, err := collectCommands(f, dep, vars, positional, allArgs, stack, shellCache)
 			if err != nil {
 				return nil, err
 			}
@@ -120,7 +120,11 @@ func collectCommands(f *config.File, t *config.Task, vars map[string]string, pos
 	return cmds, nil
 }
 
-func interpolate(s string, vars map[string]string, positional []string, shellCache map[string]string) (string, error) {
+func interpolate(s string, vars map[string]string, positional []string, shellCache map[string]string, allArgs ...[]string) (string, error) {
+	all := positional
+	if len(allArgs) > 0 {
+		all = allArgs[0]
+	}
 	var firstErr error
 	result := tokenRe.ReplaceAllStringFunc(s, func(match string) string {
 		if firstErr != nil {
@@ -136,7 +140,7 @@ func interpolate(s string, vars map[string]string, positional []string, shellCac
 			primary = inner
 		}
 
-		if v, ok := resolveAt(primary, positional); ok {
+		if v, ok := resolveAt(primary, positional, all); ok {
 			if v != "" {
 				return v
 			}
@@ -177,7 +181,7 @@ func interpolate(s string, vars map[string]string, positional []string, shellCac
 			return fallback
 		}
 
-		return match
+		return ""
 	})
 	return result, firstErr
 }
@@ -219,7 +223,7 @@ func resolveLazyValue(key string, vars map[string]string, positional []string, s
 			if resolved {
 				return v
 			}
-			return match
+			return ""
 		})
 		if refErr != nil {
 			return "", true, refErr
@@ -240,12 +244,12 @@ func resolveLazyValue(key string, vars map[string]string, positional []string, s
 	return raw, true, nil
 }
 
-func resolveAt(primary string, positional []string) (string, bool) {
+func resolveAt(primary string, positional, allArgs []string) (string, bool) {
 	if primary == "@" {
-		if len(positional) == 0 {
+		if len(allArgs) == 0 {
 			return "", true
 		}
-		return strings.Join(positional, " "), true
+		return strings.Join(allArgs, " "), true
 	}
 
 	m := atRe.FindStringSubmatch(primary)

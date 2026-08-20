@@ -55,6 +55,10 @@ Access them in commands: `{{KEY}}`. Built-in variables: `{{CWD}}`, `{{OS}}`, `{{
 `{{ARGS}}`, `{{1}}`, `{{2}}`, ... (positional CLI args), `{{--key}}` (named CLI args),
 `{{-f}}` (boolean flags).
 
+`{{@}}` expands to all task arguments in their original order, including positional arguments,
+named arguments, and flags. Missing variables or arguments expand to an empty string; use the
+`||` fallback syntax when a default is required.
+
 Fallback syntax: `{{--entry||ENTRY}}` — use `--entry` if non-empty, else `ENTRY` var,
 else literal `ENTRY`.
 

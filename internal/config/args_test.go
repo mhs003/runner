@@ -7,6 +7,9 @@ import (
 
 func TestParseArgsEmpty(t *testing.T) {
 	ra := ParseArgs([]string{})
+	if len(ra.All) != 0 {
+		t.Fatalf("expected 0 all args, got %d", len(ra.All))
+	}
 	if len(ra.Positional) != 0 {
 		t.Fatalf("expected 0 positional, got %d", len(ra.Positional))
 	}
@@ -72,7 +75,11 @@ func TestParseArgsFlagThenNamed(t *testing.T) {
 }
 
 func TestParseArgsMixed(t *testing.T) {
-	ra := ParseArgs([]string{"--dry", "--entry", "./cmd/app", "build", "-v"})
+	args := []string{"--dry", "--entry", "./cmd/app", "build", "-v"}
+	ra := ParseArgs(args)
+	if !reflect.DeepEqual(ra.All, args) {
+		t.Fatalf("expected all args %v, got %v", args, ra.All)
+	}
 	if !ra.Flags["--dry"] {
 		t.Fatal("expected --dry flag")
 	}

@@ -6,6 +6,7 @@ import (
 
 func ParseArgs(args []string) RunArgs {
 	ra := RunArgs{
+		All:   append([]string(nil), args...),
 		Named: make(map[string]string),
 		Flags: make(map[string]bool),
 	}

@@ -12,6 +12,14 @@ func interp(s string, vars map[string]string, positional []string, shellCache ma
 	return result
 }
 
+func interpWithAll(s string, vars map[string]string, positional, allArgs []string) string {
+	result, err := interpolate(s, vars, positional, nil, allArgs)
+	if err != nil {
+		return ""
+	}
+	return result
+}
+
 func TestInterpolateNoMatch(t *testing.T) {
 	result := interp("hello world", map[string]string{}, nil, nil)
 	if result != "hello world" {
@@ -35,8 +43,29 @@ func TestInterpolateMultiple(t *testing.T) {
 
 func TestInterpolateNoMatchStays(t *testing.T) {
 	result := interp("{{MISSING}}", map[string]string{"NAME": "hello"}, nil, nil)
-	if result != "{{MISSING}}" {
-		t.Fatalf("expected '{{MISSING}}', got '%s'", result)
+	if result != "" {
+		t.Fatalf("expected empty result, got '%s'", result)
+	}
+}
+
+func TestInterpolateMissingNamedArgumentIsEmpty(t *testing.T) {
+	result := interp("echo {{--path}}", map[string]string{}, nil, nil)
+	if result != "echo " {
+		t.Fatalf("expected missing named argument to be empty, got '%s'", result)
+	}
+}
+
+func TestInterpolateMissingFlagIsEmpty(t *testing.T) {
+	result := interp("echo {{-v}}", map[string]string{}, nil, nil)
+	if result != "echo " {
+		t.Fatalf("expected missing flag to be empty, got '%s'", result)
+	}
+}
+
+func TestInterpolateNestedMissingTokenIsEmpty(t *testing.T) {
+	result := interp("echo {{MESSAGE}}", map[string]string{"MESSAGE": "hello {{NAME}}"}, nil, nil)
+	if result != "echo hello " {
+		t.Fatalf("expected nested missing token to be empty, got '%s'", result)
 	}
 }
 
@@ -132,8 +161,16 @@ func TestInterpolateAtAll(t *testing.T) {
 
 func TestInterpolateAtAllEmpty(t *testing.T) {
 	result := interp("echo {{@}}", map[string]string{}, nil, nil)
-	if result != "echo {{@}}" {
-		t.Fatalf("expected 'echo {{@}}', got '%s'", result)
+	if result != "echo " {
+		t.Fatalf("expected 'echo ', got '%s'", result)
+	}
+}
+
+func TestInterpolateAtAllIncludesNamedArgsAndFlags(t *testing.T) {
+	args := []string{"artisan", "migrate", "--path=path/to/migration-file.php", "-v"}
+	result := interpWithAll("{{@}}", map[string]string{}, []string{"artisan", "migrate"}, args)
+	if result != "artisan migrate --path=path/to/migration-file.php -v" {
+		t.Fatalf("expected all original args, got '%s'", result)
 	}
 }
 
@@ -209,8 +246,8 @@ func TestInterpolateAtRangeFullSlice(t *testing.T) {
 
 func TestInterpolateAtRangeMgtN(t *testing.T) {
 	result := interp("{{4@2}}", map[string]string{}, []string{"a", "b", "c", "d"}, nil)
-	if result != "{{4@2}}" {
-		t.Fatalf("expected '{{4@2}}', got '%s'", result)
+	if result != "" {
+		t.Fatalf("expected empty result, got '%s'", result)
 	}
 }
 
@@ -242,15 +279,15 @@ func TestInterpolateAtWithNamedArgsStripped(t *testing.T) {
 
 func TestInterpolateAtZero(t *testing.T) {
 	result := interp("{{@0}}", map[string]string{}, []string{"a", "b"}, nil)
-	if result != "{{@0}}" {
-		t.Fatalf("expected '{{@0}}', got '%s'", result)
+	if result != "" {
+		t.Fatalf("expected empty result, got '%s'", result)
 	}
 }
 
 func TestInterpolateAtNegative(t *testing.T) {
 	result := interp("{{@-1}}", map[string]string{}, []string{"a", "b"}, nil)
-	if result != "{{@-1}}" {
-		t.Fatalf("expected '{{@-1}}', got '%s'", result)
+	if result != "" {
+		t.Fatalf("expected empty result, got '%s'", result)
 	}
 }
 
