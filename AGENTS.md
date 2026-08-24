@@ -25,9 +25,9 @@ executes commands through `/bin/sh -c`.
 | `go run ./cmd/run [task]` | Run without installing |
 | `./build/run --list` | List all tasks |
 | `./build/run --dry <task>` | Dry-run (print commands, no exec) |
-| `./build/run install` | Installs to `~/.config/hypr/bin/run` |
+| `./build/run install` | Installs to `~/.local/bin/run` |
 
-There are **106 test cases** across 6 test files. There is no CI.
+There are unit tests across the command, config, and engine packages. There is no CI.
 
 ---
 

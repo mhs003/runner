@@ -6,7 +6,7 @@
 custom DSL inspired by `just`/`Make`), parses it with a hand-written lexer and parser, resolves
 inter-task dependencies via topological sort, and executes shell commands through `/bin/sh -c`.
 
-The entire project is ~1007 lines of Go, spread across 10 source files in 4 packages (plus 6 test files with 106 test cases).
+The project uses standard-library-only Go code across the command, config, display, and engine packages. The repository also includes unit tests for the parser, lexer, variable handling, loader, resolver, argument parsing, and executor.
 There are no external dependencies and no CI.
 
 ---
@@ -62,7 +62,7 @@ There are no external dependencies and no CI.
 
 ## Package Map
 
-### `cmd/run/main.go` (120 lines) — Entry Point
+### `cmd/run/main.go` — Entry Point
 
 **Responsibility:** CLI orchestration.
 
@@ -241,9 +241,9 @@ parse(lines):
 - Duplicate task names return a `ParseError`.
 
 **Inline dependencies:**
-- Within a task body, `@depname` adds `depname` to the current task's `Deps` list.
-- Multiple deps can be on one line: `@ dep1 dep2` (after stripping `@`, `strings.Fields`
-  splits the rest).
+- Within a task body, `@ depname [args...]` adds one inline dependency to `BodyLines`.
+- The first field is the dependency name; remaining fields are arguments. Thus `@ dep1 dep2`
+  means dependency `dep1` with one argument, `dep2`.
 
 ---
 
@@ -272,7 +272,7 @@ func ParseArgs(args []string) RunArgs
 
 ---
 
-### `internal/display/list.go` (138 lines) — Task List Formatter
+### `internal/display/list.go` — Task List Formatter
 
 **Responsibility:** Format and print the `--list` output (plain text or JSON).
 
@@ -367,7 +367,7 @@ at execution time by `collectCommands`.
 
 ---
 
-### `internal/engine/executor.go` (358 lines) — Command Executor
+### `internal/engine/executor.go` — Command Executor
 
 **Responsibility:** Collect all commands (including recursively inlined deps) into one script per task, execute via `/bin/sh -c`.
 
@@ -478,7 +478,8 @@ fallback when an argument or variable is absent.
   collection and cleaned up afterward.
 - **Cycle detection** — a `stack` map tracks the current recursion chain in `collectCommands`,
   catching cycles in inline dep references.
-- **No `--keep-going`** — first failing command stops execution entirely.
+- **No `--keep-going`** — tasks run sequentially. `[exit-on-error]` adds `set -e`; without
+  it, ordinary `/bin/sh` failure behavior applies.
 - **Stdio passthrough** — commands inherit the terminal.
 
 ---
@@ -576,9 +577,9 @@ test:
 | Custom file format (not YAML/TOML) | Minimal, task-runner-specific syntax | Steep learning curve, no ecosystem tooling |
 | `/bin/sh -c` execution | Shell features work (pipes, redirects) | Shell injection, platform-specific |
 | Regex-based variable interpolation | Avoids substring corruption, enables fallback syntax | Regex compile cost (one-time) vs naive ReplaceAll |
-| 106 unit tests across 6 files | Safety net for refactoring | No integration or end-to-end tests |
+| Unit tests across config, engine, and command packages | Safety net for refactoring | No integration or end-to-end tests |
 | Single `/bin/sh -c` per task with command inlining | Shell variable persistence across `@ dep` boundaries | Larger script per task, harder to debug individual failures |
-| Sequential execution (no `--keep-going`) | Simplicity | First failure aborts all remaining tasks |
+| Sequential execution (no `--keep-going`) | Simplicity | A task failure returned by the shell aborts later tasks; commands without `set -e` may continue within that task |
 | `--file` flag for custom config paths | Flexibility without breaking default | No upward directory search |
 | 2-space indentation | Visual clarity | Tab = 1 indent (breaks convention) |
 
@@ -586,8 +587,7 @@ test:
 
 ## Known Issues & TODOs
 
-1. **No `--help` flag**: `flag` package auto-generates basic help, but there's no explicit
-   `--help` handling.
+1. **Help is provided by Go's `flag` package**: there is no custom help formatter.
 
 2. **Fallback syntax edge case**: `{{key||default}}` resolves `default` as a var key first,
    then as a literal. If a var exists with the same name as the intended literal, the var

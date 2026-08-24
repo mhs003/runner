@@ -14,7 +14,7 @@ $ ./build/run [flags] <task> [--key val] [-f] [args...]
 go build -o build/run ./cmd/run      # build binary
 make                                  # build (make)
 ./build/run install                   # install to ~/.local/bin
-go test ./...                         # run all tests (106 tests, 6 files)
+go test ./...                         # run all Go tests
 go vet ./...                          # static analysis
 ```
 
@@ -79,7 +79,7 @@ taskname:             # ← task header (indent 0)
   shell command       # ← body lines (indent 2+)
   !echo verbose       # ← verbose: prints "> echo verbose" before running
   @ depname           # ← inline dependency
-  @ build --target x  # ← inline dependency with args
+  @ build --target x  # ← dependency with arguments
 
 taskname: dep1 dep2:  # ← task with header dependencies (dep1, dep2 run first)
   echo done
@@ -110,7 +110,7 @@ taskname: dep1 dep2:  # ← task with header dependencies (dep1, dep2 run first)
   ```
   `{{HOST}}` executes `hostname` once, caches the result. `{{DESC}}` → `coder71 is live`. `$VAR` env vars from `@vars` are available inside `$(cmd)`.
 - **Quotes stored literally:** `BIN = "app"` → `{{BIN}}` yields `"app"` (with quotes)
-- Empty lines and comments (`#`) allowed within the block
+- Empty lines and comment lines (including indented `#` lines) are ignored
 
 ### Tasks
 
@@ -135,7 +135,7 @@ install:
 | Type | Syntax | When resolved |
 |------|--------|---------------|
 | **Header dep** | `taskname: dep1 dep2:` | Before execution (topological sort) |
-| **Inline dep** | `  @ depname` (indented) | At execution time (inlined into script) |
+| **Inline dep** | `  @ depname [args...]` (indented) | At execution time (inlined into script) |
 
 **Header dep** — runs once, independently, in resolved order.
 **Inline dep** — commands are recursively collected and inlined into the caller's `/bin/sh -c` script, so shell variables (`$MSG`) persist across boundaries.
@@ -159,8 +159,9 @@ build:
   test "{{--release}}" = "true" && echo "release mode"
 ```
 
-- Args passed to `@ <dep>` are injected as variables into the dep's scope
-- Dep args only override variables that don't already exist
+- The first word after `@` is the dependency name; remaining words are its arguments
+- Args passed to `@ <dep>` are parsed as named arguments and flags, then temporarily injected into the dep's scope
+- Dep args overwrite existing variables during that call; newly introduced vars are cleaned up afterward
 - After the dep completes, newly-introduced vars are cleaned up
 - **CLI-level args (`{{@}}`) are NOT overridden by dep-call-site args** — they always resolve to the complete top-level CLI task arguments
 
@@ -174,9 +175,9 @@ taskname: # inline comment at top level → taskname:
   echo hello # keeps # in shell — passed literally
 ```
 
-- `#` at start of trimmed line → skipped entirely
+- `#` at start of trimmed line → skipped entirely, including indented comment lines
 - `#` at indent 0 (top level) with preceding text → stripped from `#` onward
-- `#` in indented body lines → **preserved** (passed to shell as-is)
+- `#` in an indented body command → **preserved** (passed to shell as-is); a comment-only line is skipped
 
 ### Annotations
 
@@ -306,7 +307,7 @@ Parse → ResolveVars → Inject vars → Resolve (topological sort) → Execute
   ```
 - **Lazy `$(cmd)` execution** — `$(cmd)` in `@vars` values runs only when the variable is first used. Result is cached in `shellCache` shared across all tasks and inline deps.
 - **`[exit-on-error]`** prepends `set -e` to the script — first non-zero exit stops everything
-- **No `--keep-going`** — first failing command (or `$(cmd)`) in any task stops all subsequent tasks
+- **No `--keep-going`** — tasks run sequentially; `[exit-on-error]` adds `set -e`, while ordinary `/bin/sh` behavior applies without it
 - **Stdio passthrough** — commands inherit stdin/stdout/stderr from the terminal
 - **Verbose mode (`!`)** — prepends `echo '> <command>'` in the script, works with dry-run
 
@@ -330,11 +331,11 @@ No visual distinction between commands from the parent task vs commands from inl
 |--------|--------|
 | **Quotes are literal** | `@vars:` stores quotes as-is. If you write `BIN = "run"`, then `{{BIN}}` expands to `"run"` (with quotes). The shell handles quoting. |
 | **Tabs = 1 indent** | The lexer counts each space/tab as one indent. Convention is **2-space indentation**. Tabs break the indent model. |
-| **`#` in body = literal** | Only top-level `#` comments are stripped. Inside a task body, `#` is passed to the shell. |
+| **`#` in body** | Comment-only lines are stripped at every indentation. A `#` in a command is passed to the shell. |
 | **`@` with nothing after** | `@` on a body line with no following text → silently skipped |
 | **Fallback resolved as var** | `{{X\|\|Y}}` — if `Y` is a valid variable, its value is used. Use `{{X\|\| literal}}` for literals. |
 | **`--dry` prints flat** | No visual separation between parent and dep commands. Also: `$(cmd)` in vars still runs during dry-run (needed for interpolation). |
-| **No `--help`** | Go's `flag` package auto-generates basic help via `-h` |
+| **Help** | Go's `flag` package provides basic help via `-h` / `--help` |
 | **`{{@}}` in deps** | `{{@}}` inside an inline dep's body resolves to all **top-level CLI** task args, not dep-call-site args |
 | **Empty `@`** | `{{@}}` with no args resolves to an empty string. Use `{{@\|\|fallback}}` for a default. |
 | **Range `M@N` clamp** | If N > len(args), clamps to max. If M > N, the token becomes empty. |
